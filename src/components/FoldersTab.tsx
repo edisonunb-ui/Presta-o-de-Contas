@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { collection, addDoc, doc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { User, Folder, FileEntry } from "../types";
-import { FolderKanban, FileText, UploadCloud, Trash2, Download, Plus, AlertCircle, FileCheck } from "lucide-react";
+import { FolderKanban, FileText, UploadCloud, Trash2, Download, Plus, AlertCircle, FileCheck, FolderClosed, FolderOpen } from "lucide-react";
 
 interface FoldersTabProps {
   currentUser: User;
@@ -40,9 +40,36 @@ export default function FoldersTab({
 }: FoldersTabProps) {
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   
+  // Custom Modal configuration
+  const [modalConfig, setModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    isConfirm?: boolean;
+    onConfirm?: () => void;
+  } | null>(null);
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      isConfirm: true,
+      onConfirm,
+    });
+  };
+
+  const showAlert = (title: string, message: string) => {
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      isConfirm: false,
+    });
+  };
+
   // Folder form
-  const [newFolderYear, setNewFolderYear] = useState<number>(new Date().getFullYear());
-  const [newFolderMonth, setNewFolderMonth] = useState<number>(new Date().getMonth() + 1);
+  const [newFolderName, setNewFolderName] = useState("");
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
 
   // File Upload
@@ -51,12 +78,28 @@ export default function FoldersTab({
   const [dragOver, setDragOver] = useState(false);
 
   // Permission checks
-  const canModify = currentUser.role === "SuperADM" || currentUser.role === "Administrador";
+  const hasPermission = (key: string, defaultVal: boolean) => {
+    if (currentUser.role === "SuperADM") return true;
+    if (currentUser.permissions && (currentUser.permissions as any)[key] !== undefined) {
+      return !!(currentUser.permissions as any)[key];
+    }
+    return defaultVal;
+  };
+
+  const canViewFolders = hasPermission("folders_view", true);
+  const canCreateOrDeleteFolders = hasPermission("folders_create", currentUser.role === "SuperADM");
+  const canUploadFiles = hasPermission("files_upload", currentUser.role === "SuperADM" || currentUser.role === "Administrador");
+  const canDeleteFiles = hasPermission("files_delete", currentUser.role === "SuperADM");
+  const canViewFiles = hasPermission("files_view", true);
 
   // Filter folders for the selected condominium
   const filteredFolders = folders
     .filter((f) => f.condominiumId === selectedCondominiumId)
-    .sort((a, b) => b.year - a.year || b.month - a.month);
+    .sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeB - timeA; // Newest folders created by the user appear first!
+    });
 
   // Filter files for the selected folder
   const filteredFiles = files.filter((file) => file.folderId === selectedFolderId);
@@ -66,34 +109,48 @@ export default function FoldersTab({
     e.preventDefault();
     if (!selectedCondominiumId) return;
 
-    // Check if folder for same year and month already exists
+    const trimmedName = newFolderName.trim();
+    if (!trimmedName) return;
+
+    // Check if folder with the same name already exists (case insensitive)
     const exists = filteredFolders.some(
-      (f) => f.year === newFolderYear && f.month === newFolderMonth
+      (f) => f.name?.toLowerCase() === trimmedName.toLowerCase()
     );
+
     if (exists) {
-      alert(`Já existe uma pasta para ${MONTHS_PT[newFolderMonth - 1]} / ${newFolderYear}!`);
+      showAlert("Pasta Existente", `Já existe uma pasta com o nome "${trimmedName}"!`);
       return;
     }
 
     try {
+      // Auto-extract year if any 4-digit number exists in the name, or default to current year
+      let parsedYear = new Date().getFullYear();
+      const yearMatch = trimmedName.match(/\b(20\d{2})\b/);
+      if (yearMatch) {
+        parsedYear = parseInt(yearMatch[1]);
+      }
+
       const docRef = await addDoc(collection(db, "pastas"), {
         condominiumId: selectedCondominiumId,
-        year: newFolderYear,
-        month: newFolderMonth,
+        name: trimmedName,
+        year: parsedYear,
+        month: 1,
         createdAt: new Date().toISOString(),
       });
       await updateDoc(doc(db, "pastas", docRef.id), { id: docRef.id });
 
       onAddAuditLog(
         "Criação de Pasta",
-        `Criou pasta mensal: ${MONTHS_PT[newFolderMonth - 1]}/${newFolderYear} para o condomínio ${condominiumName}`
+        `Criou a pasta "${trimmedName}" no condomínio ${condominiumName}`
       );
 
       setSelectedFolderId(docRef.id);
+      setNewFolderName("");
       setIsCreatingFolder(false);
       onRefresh();
     } catch (error) {
       console.error(error);
+      showAlert("Erro", "Erro ao criar pasta: " + (error instanceof Error ? error.message : String(error)));
     }
   };
 
@@ -131,7 +188,9 @@ export default function FoldersTab({
         await updateDoc(doc(db, "arquivos", docRef.id), { id: docRef.id });
 
         const folderObj = folders.find((f) => f.id === selectedFolderId);
-        const folderLabel = folderObj ? `${MONTHS_PT[folderObj.month - 1]}/${folderObj.year}` : selectedFolderId;
+        const folderLabel = folderObj 
+          ? (folderObj.name || `${MONTHS_PT[folderObj.month - 1]}/${folderObj.year}`) 
+          : selectedFolderId;
         
         onAddAuditLog(
           "Upload de Arquivo",
@@ -179,67 +238,101 @@ export default function FoldersTab({
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
-      alert("Falha no download do PDF. Exibindo alternativa de texto.");
+      showAlert("Erro de Download", "Falha no download do PDF. Exibindo alternativa de texto.");
     }
   };
 
   // Delete File
-  const handleDeleteFile = async (id: string, name: string) => {
-    if (!confirm(`Tem certeza de que deseja excluir o arquivo "${name}"?`)) return;
-    try {
-      await deleteDoc(doc(db, "arquivos", id));
-      onAddAuditLog(
-        "Exclusão de Arquivo",
-        `Excluiu o arquivo: ${name} do condomínio ${condominiumName}`
-      );
-      onRefresh();
-    } catch (err) {
-      console.error(err);
+  const handleDeleteFile = (id: string, name: string) => {
+    if (!id) {
+      showAlert("Erro", "Erro: ID do arquivo inválido ou não carregado. Atualize a página e tente novamente.");
+      return;
     }
+    showConfirm(
+      "Confirmar Exclusão",
+      `Tem certeza de que deseja excluir o arquivo "${name}"?`,
+      async () => {
+        try {
+          await deleteDoc(doc(db, "arquivos", id));
+          onAddAuditLog(
+            "Exclusão de Arquivo",
+            `Excluiu o arquivo: ${name} do condomínio ${condominiumName}`
+          );
+          onRefresh();
+        } catch (err) {
+          console.error(err);
+          showAlert("Erro", "Erro ao excluir o arquivo do banco de dados: " + (err instanceof Error ? err.message : String(err)));
+        }
+      }
+    );
   };
 
   // Delete Folder
-  const handleDeleteFolder = async (folderId: string, label: string) => {
-    if (!confirm(`Tem certeza de que deseja excluir a pasta "${label}" e TODOS os seus arquivos?`)) return;
-    try {
-      // Delete associated files first
-      const associatedFiles = files.filter(f => f.folderId === folderId);
-      for (const file of associatedFiles) {
-        await deleteDoc(doc(db, "arquivos", file.id));
-      }
-      await deleteDoc(doc(db, "pastas", folderId));
-
-      onAddAuditLog(
-        "Exclusão de Pasta",
-        `Excluiu a pasta mensal: ${label} e seus arquivos associados para o condomínio ${condominiumName}`
-      );
-
-      if (selectedFolderId === folderId) {
-        setSelectedFolderId(null);
-      }
-      onRefresh();
-    } catch (err) {
-      console.error(err);
+  const handleDeleteFolder = (folderId: string, label: string) => {
+    if (!folderId) {
+      showAlert("Erro", "Erro: ID da pasta inválido.");
+      return;
     }
+    showConfirm(
+      "Confirmar Exclusão",
+      `Tem certeza de que deseja excluir a pasta "${label}" e TODOS os seus arquivos?`,
+      async () => {
+        try {
+          // Delete associated files first
+          const associatedFiles = files.filter(f => f.folderId === folderId);
+          for (const file of associatedFiles) {
+            if (file.id) {
+              await deleteDoc(doc(db, "arquivos", file.id));
+            }
+          }
+          await deleteDoc(doc(db, "pastas", folderId));
+
+          onAddAuditLog(
+            "Exclusão de Pasta",
+            `Excluiu a pasta mensal: ${label} e seus arquivos associados para o condomínio ${condominiumName}`
+          );
+
+          if (selectedFolderId === folderId) {
+            setSelectedFolderId(null);
+          }
+          onRefresh();
+        } catch (err) {
+          console.error(err);
+          showAlert("Erro", "Erro ao excluir a pasta do banco de dados: " + (err instanceof Error ? err.message : String(err)));
+        }
+      }
+    );
   };
 
   const selectedFolder = folders.find((f) => f.id === selectedFolderId);
+
+  if (!canViewFolders) {
+    return (
+      <div className="bg-white p-12 border border-[#111111] text-center max-w-2xl mx-auto space-y-4">
+        <FolderClosed className="w-12 h-12 text-[#C2A87E] mx-auto animate-pulse" />
+        <h3 className="font-serif italic text-2xl text-[#111111]">Acesso Restrito</h3>
+        <p className="text-sm text-gray-600 font-sans max-w-md mx-auto">
+          Você não possui permissão para visualizar as pastas deste condomínio. Entre em contato com o administrador para solicitar acesso.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div id="foldersTabRoot" className="grid grid-cols-1 md:grid-cols-3 gap-8">
       {/* Column 1: Folder list */}
       <div className="md:col-span-1 bg-white p-6 border border-[#111111] flex flex-col h-[600px] shadow-none">
         <div className="flex items-center justify-between pb-4 border-b border-[#111111] mb-6">
-          <h2 className="font-serif italic text-2xl text-[#111111] flex items-center gap-2">
-            <FolderKanban className="w-5 h-5" /> Pastas Mensais
+          <h2 className="font-serif italic text-xl text-[#111111] flex items-center gap-2">
+            <FolderKanban className="w-4 h-4 text-[#111111]" /> Pastas do Condomínio
           </h2>
-          {canModify && (
+          {canCreateOrDeleteFolders && (
             <button
               onClick={() => setIsCreatingFolder(!isCreatingFolder)}
-              className="p-1 border border-[#111111] hover:bg-[#F4F2EE] transition-colors cursor-pointer"
-              title="Nova Pasta"
+              className="p-1.5 border border-[#111111] bg-white hover:bg-[#F4F2EE] transition-colors cursor-pointer flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider"
+              title="Criar Nova Pasta"
             >
-              <Plus className="w-5 h-5 text-[#111111]" />
+              <Plus className="w-3.5 h-3.5 text-[#111111]" /> Criar
             </button>
           )}
         </div>
@@ -249,36 +342,21 @@ export default function FoldersTab({
             onSubmit={handleCreateFolder}
             className="mb-6 p-4 border border-[#111111] bg-[#F4F2EE]/30 space-y-4"
           >
-            <h4 className="font-bold text-[10px] uppercase tracking-widest text-[#111111]">Nova Pasta Mensal</h4>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-1.5">Ano</label>
-                <input
-                  type="number"
-                  min={2020}
-                  max={2100}
-                  value={newFolderYear}
-                  onChange={(e) => setNewFolderYear(parseInt(e.target.value))}
-                  className="w-full px-3 py-2 border border-[#111111] rounded-none text-sm bg-white outline-none"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-1.5">Mês</label>
-                <select
-                  value={newFolderMonth}
-                  onChange={(e) => setNewFolderMonth(parseInt(e.target.value))}
-                  className="w-full px-3 py-2 border border-[#111111] rounded-none text-sm bg-white outline-none"
-                  required
-                >
-                  {MONTHS_PT.map((m, idx) => (
-                    <option key={idx} value={idx + 1}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <h4 className="font-bold text-[10px] uppercase tracking-widest text-[#111111]">Nova Pasta</h4>
+            
+            <div>
+              <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-1.5">Nome da Pasta</label>
+              <input
+                type="text"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder="Ex: Ano 2026, Prestação 2026, etc."
+                className="w-full px-3 py-2 border border-[#111111] rounded-none text-sm bg-white outline-none text-[#111111]"
+                required
+                autoFocus
+              />
             </div>
+
             <div className="flex gap-2 pt-2">
               <button
                 type="submit"
@@ -300,11 +378,11 @@ export default function FoldersTab({
         <div className="flex-1 overflow-y-auto space-y-2 pr-1">
           {filteredFolders.length === 0 ? (
             <div className="text-center py-12 text-gray-400 text-sm font-serif italic">
-              Nenhuma pasta mensal criada.
+              Nenhuma pasta criada.
             </div>
           ) : (
             filteredFolders.map((folder, index) => {
-              const label = `${MONTHS_PT[folder.month - 1]} / ${folder.year}`;
+              const label = folder.name || `${MONTHS_PT[folder.month - 1]} / ${folder.year}`;
               const isSelected = folder.id === selectedFolderId;
               const fileCount = files.filter((f) => f.folderId === folder.id).length;
               const formattedIndex = String(index + 1).padStart(2, '0');
@@ -319,15 +397,22 @@ export default function FoldersTab({
                       : "bg-[#FDFCFB]/50 hover:bg-[#F4F2EE]/30 text-gray-700"
                   }`}
                 >
-                  <span className="font-serif italic text-sm text-center text-[#111111]/40 group-hover:text-[#111111]">
+                  <span className="font-serif italic text-xs text-center text-[#111111]/40 group-hover:text-[#111111]">
                     {formattedIndex}
                   </span>
                   <div className="flex items-center justify-between pr-3">
-                    <div>
-                      <div className="text-xs font-bold uppercase tracking-wider">{label}</div>
-                      <div className="text-[10px] text-gray-500 font-serif italic">{fileCount} arquivos anexados</div>
+                    <div className="flex items-center gap-3 min-w-0">
+                      {isSelected ? (
+                        <FolderOpen className="w-5 h-5 text-[#C2A87E] shrink-0" />
+                      ) : (
+                        <FolderClosed className="w-5 h-5 text-[#111111]/60 group-hover:text-[#111111] shrink-0" />
+                      )}
+                      <div className="truncate">
+                        <div className="text-xs font-bold uppercase tracking-wider truncate">{label}</div>
+                        <div className="text-[10px] text-gray-500 font-serif italic">{fileCount} {fileCount === 1 ? "arquivo" : "arquivos"}</div>
+                      </div>
                     </div>
-                    {canModify && (
+                    {canCreateOrDeleteFolders && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -350,21 +435,34 @@ export default function FoldersTab({
       {/* Column 2 & 3: Selected folder files panel */}
       <div className="md:col-span-2 bg-white p-6 border border-[#111111] flex flex-col h-[600px] shadow-none">
         {selectedFolder ? (
-          <>
+          !canViewFiles ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-4">
+              <FolderClosed className="w-12 h-12 text-[#C2A87E] mx-auto" />
+              <h3 className="font-serif italic text-xl text-[#111111]">Acesso Restrito a Arquivos</h3>
+              <p className="text-sm text-gray-500 font-sans max-w-sm mx-auto">
+                Sua permissão de acesso não permite visualizar os arquivos e documentos digitalizados desta pasta.
+              </p>
+            </div>
+          ) : (
+            <>
             <div className="flex items-center justify-between pb-4 border-b border-[#111111]">
               <div>
-                <p className="text-[10px] uppercase tracking-[0.2em] font-bold opacity-40">Documentação Selecionada</p>
-                <h3 className="text-3xl font-serif italic tracking-tight text-[#111111]">
-                  {MONTHS_PT[selectedFolder.month - 1]} / {selectedFolder.year}
+                <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.2em] font-bold text-gray-400">
+                  <span>Pastas</span>
+                  <span>/</span>
+                  <span className="text-[#C2A87E]">{selectedFolder.name || `${MONTHS_PT[selectedFolder.month - 1]} / ${selectedFolder.year}`}</span>
+                </div>
+                <h3 className="text-2xl font-serif italic tracking-tight text-[#111111] mt-1">
+                  {selectedFolder.name || `${MONTHS_PT[selectedFolder.month - 1]} / ${selectedFolder.year}`}
                 </h3>
               </div>
-              <span className="border border-[#111111] bg-[#F4F2EE] text-[#111111] text-[10px] uppercase font-bold tracking-widest px-3 py-1.5">
-                {filteredFiles.length} ARQUIVOS PDF
+              <span className="border border-[#111111] bg-[#F4F2EE] text-[#111111] text-[10px] uppercase font-bold tracking-widest px-3 py-1.5 shrink-0">
+                {filteredFiles.length} {filteredFiles.length === 1 ? "ARQUIVO PDF" : "ARQUIVOS PDF"}
               </span>
             </div>
 
             {/* Upload Zone (Administradores only) */}
-            {canModify && (
+            {canUploadFiles && (
               <div className="mt-4">
                 <div
                   onDragOver={(e) => {
@@ -413,7 +511,7 @@ export default function FoldersTab({
             <div className="flex-1 overflow-y-auto mt-6 space-y-4 pr-1">
               {filteredFiles.length === 0 ? (
                 <div className="text-center py-20 text-gray-400 text-sm font-serif italic">
-                  Esta pasta mensal está vazia. Nenhum arquivo PDF anexado.
+                  Esta pasta está vazia. Nenhum documento PDF de prestação de contas anexado.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-4">
@@ -443,9 +541,9 @@ export default function FoldersTab({
                           onClick={() => handleDownloadFile(file)}
                           className="px-4 py-2 border border-[#111111] hover:bg-[#F4F2EE] text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1"
                         >
-                          <Download className="w-3.5 h-3.5" /> Baixar Relatório
+                          <Download className="w-3.5 h-3.5" /> Baixar Pasta Digitalizada
                         </button>
-                        {canModify && (
+                        {canDeleteFiles && (
                           <button
                             onClick={() => handleDeleteFile(file.id, file.name)}
                             className="px-4 py-2 border border-red-700 text-red-700 hover:bg-red-50 text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1"
@@ -459,19 +557,66 @@ export default function FoldersTab({
                 </div>
               )}
             </div>
-          </>
+            </>
+          )
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center text-gray-400 p-8">
             <div className="p-4 bg-[#F4F2EE] border border-[#111111] mb-4 text-[#111111]">
               <FileText className="w-12 h-12" />
             </div>
-            <h3 className="text-xl font-serif italic text-[#111111]">Selecione uma pasta mensal</h3>
+            <h3 className="text-xl font-serif italic text-[#111111]">Selecione uma pasta</h3>
             <p className="text-xs max-w-xs mt-2 leading-relaxed">
-              Escolha uma pasta na lista à esquerda para visualizar, enviar ou fazer o download dos arquivos de prestação de contas.
+              Escolha uma pasta na lista à esquerda para visualizar, enviar ou fazer o download dos arquivos PDF de prestação de contas.
             </p>
           </div>
         )}
       </div>
+
+      {/* Custom Confirmation / Alert Modal */}
+      {modalConfig && modalConfig.isOpen && (
+        <div id="customModal" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div 
+            className="absolute inset-0 bg-black/45 backdrop-blur-xs transition-opacity"
+            onClick={() => setModalConfig(null)}
+          />
+          <div className="relative bg-[#FAF9F6] border border-[#111111] p-6 max-w-md w-full shadow-lg z-10">
+            <h3 className="font-serif italic text-xl text-[#111111] border-b border-[#111111]/10 pb-3 mb-4">
+              {modalConfig.title}
+            </h3>
+            <p className="text-sm text-gray-700 leading-relaxed font-sans mb-6">
+              {modalConfig.message}
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              {modalConfig.isConfirm ? (
+                <>
+                  <button
+                    onClick={() => setModalConfig(null)}
+                    className="px-4 py-2 bg-white hover:bg-gray-100 text-[#111111] text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (modalConfig.onConfirm) modalConfig.onConfirm();
+                      setModalConfig(null);
+                    }}
+                    className="px-4 py-2 bg-[#111111] hover:bg-[#C2A87E] text-white text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                  >
+                    Confirmar
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setModalConfig(null)}
+                  className="px-4 py-2 bg-[#111111] hover:bg-[#C2A87E] text-white text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                >
+                  OK
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

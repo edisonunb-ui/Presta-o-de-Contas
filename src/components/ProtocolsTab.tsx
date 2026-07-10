@@ -25,6 +25,48 @@ export default function ProtocolsTab({
 }: ProtocolsTabProps) {
   const [selectedProtocolId, setSelectedProtocolId] = useState<string | null>(null);
   
+  // Permission checks
+  const hasPermission = (key: string, defaultVal: boolean) => {
+    if (currentUser.role === "SuperADM") return true;
+    if (currentUser.permissions && (currentUser.permissions as any)[key] !== undefined) {
+      return !!(currentUser.permissions as any)[key];
+    }
+    return defaultVal;
+  };
+
+  const canViewProtocols = hasPermission("protocols_view", true);
+  const canCreateProtocols = hasPermission("protocols_create", true);
+  const canReplyProtocols = hasPermission("protocols_reply", true);
+  const canCloseProtocols = hasPermission("protocols_close", currentUser.role === "SuperADM" || currentUser.role === "Administrador");
+  
+  // Custom Modal configuration
+  const [modalConfig, setModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    isConfirm?: boolean;
+    onConfirm?: () => void;
+  } | null>(null);
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      isConfirm: true,
+      onConfirm,
+    });
+  };
+
+  const showAlert = (title: string, message: string) => {
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      isConfirm: false,
+    });
+  };
+
   // Create protocol states
   const [isCreatingProtocol, setIsCreatingProtocol] = useState(false);
   const [protoSubject, setProtoSubject] = useState("");
@@ -97,7 +139,7 @@ export default function ProtocolsTab({
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       if (file.size > 2 * 1024 * 1024) {
-        alert("O tamanho máximo para anexo é de 2MB.");
+        showAlert("Aviso", "O tamanho máximo para anexo é de 2MB.");
         return;
       }
       const reader = new FileReader();
@@ -146,35 +188,39 @@ export default function ProtocolsTab({
   };
 
   // Close Protocol
-  const handleCloseProtocol = async () => {
+  const handleCloseProtocol = () => {
     if (!selectedProtocolId) return;
-    if (!confirm("Deseja realmente encerrar esta demanda? Não será mais possível enviar novas mensagens.")) return;
+    showConfirm(
+      "Encerrar Demanda",
+      "Deseja realmente encerrar esta demanda? Não será mais possível enviar novas mensagens.",
+      async () => {
+        try {
+          await updateDoc(doc(db, "protocolos", selectedProtocolId), {
+            status: "encerrado",
+            closedAt: new Date().toISOString(),
+          });
 
-    try {
-      await updateDoc(doc(db, "protocolos", selectedProtocolId), {
-        status: "encerrado",
-        closedAt: new Date().toISOString(),
-      });
+          // Add a final administrative log message
+          const msgRef = await addDoc(collection(db, "mensagens"), {
+            protocolId: selectedProtocolId,
+            senderName: "Sistema",
+            senderRole: "Sistema",
+            message: `Esta demanda foi encerrada e finalizada por ${currentUser.name}.`,
+            createdAt: new Date().toISOString(),
+          });
+          await updateDoc(doc(db, "mensagens", msgRef.id), { id: msgRef.id });
 
-      // Add a final administrative log message
-      const msgRef = await addDoc(collection(db, "mensagens"), {
-        protocolId: selectedProtocolId,
-        senderName: "Sistema",
-        senderRole: "Sistema",
-        message: `Esta demanda foi encerrada e finalizada por ${currentUser.name}.`,
-        createdAt: new Date().toISOString(),
-      });
-      await updateDoc(doc(db, "mensagens", msgRef.id), { id: msgRef.id });
+          onAddAuditLog(
+            "Encerramento de Demanda",
+            `Encerrou o protocolo (#${selectedProtocolId}) no condomínio ${condominiumName}`
+          );
 
-      onAddAuditLog(
-        "Encerramento de Demanda",
-        `Encerrou o protocolo (#${selectedProtocolId}) no condomínio ${condominiumName}`
-      );
-
-      onRefresh();
-    } catch (err) {
-      console.error(err);
-    }
+          onRefresh();
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    );
   };
 
   const handleDownloadAttachment = (base64: string, name: string) => {
@@ -201,6 +247,18 @@ export default function ProtocolsTab({
 
   const selectedProto = protocols.find((p) => p.id === selectedProtocolId);
 
+  if (!canViewProtocols) {
+    return (
+      <div className="bg-white p-12 border border-[#111111] text-center max-w-2xl mx-auto space-y-4">
+        <AlertOctagon className="w-12 h-12 text-[#C2A87E] mx-auto animate-pulse" />
+        <h3 className="font-serif italic text-2xl text-[#111111]">Acesso Restrito</h3>
+        <p className="text-sm text-gray-600 font-sans max-w-md mx-auto">
+          Você não possui permissão para visualizar a aba de Atendimentos. Entre em contato com o administrador para solicitar acesso.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div id="protocolsTabRoot" className="grid grid-cols-1 md:grid-cols-3 gap-8">
       {/* Column 1: Protocols List */}
@@ -209,13 +267,15 @@ export default function ProtocolsTab({
           <h2 className="font-serif italic text-2xl text-[#111111] flex items-center gap-2">
             <Clock className="w-5 h-5" /> Atendimentos
           </h2>
-          <button
-            onClick={() => setIsCreatingProtocol(!isCreatingProtocol)}
-            className="p-1 border border-[#111111] hover:bg-[#F4F2EE] transition-colors cursor-pointer"
-            title="Abrir Demanda"
-          >
-            <MessageSquarePlus className="w-5 h-5 text-[#111111]" />
-          </button>
+          {canCreateProtocols && (
+            <button
+              onClick={() => setIsCreatingProtocol(!isCreatingProtocol)}
+              className="p-1 border border-[#111111] hover:bg-[#F4F2EE] transition-colors cursor-pointer"
+              title="Abrir Demanda"
+            >
+              <MessageSquarePlus className="w-5 h-5 text-[#111111]" />
+            </button>
+          )}
         </div>
 
         {isCreatingProtocol && (
@@ -370,7 +430,7 @@ export default function ProtocolsTab({
                 <h3 className="text-2xl font-serif italic text-[#111111] line-clamp-1 mt-1">{selectedProto.subject}</h3>
               </div>
               <div className="flex items-center gap-2">
-                {selectedProto.status !== "encerrado" && (
+                {selectedProto.status !== "encerrado" && canCloseProtocols && (
                   <button
                     onClick={handleCloseProtocol}
                     className="flex items-center gap-1.5 border border-red-700 hover:bg-red-50 text-red-700 text-[10px] uppercase font-bold tracking-widest px-4 py-2 transition-all cursor-pointer"
@@ -447,7 +507,12 @@ export default function ProtocolsTab({
 
             {/* Reply inputs */}
             {selectedProto.status !== "encerrado" ? (
-              <form onSubmit={handleSendReply} className="space-y-4">
+              !canReplyProtocols ? (
+                <div className="bg-[#F4F2EE] p-4 border border-gray-300 text-center text-xs font-serif italic text-gray-500">
+                  Seu usuário não possui permissão para responder a chamados.
+                </div>
+              ) : (
+                <form onSubmit={handleSendReply} className="space-y-4">
                 <div className="flex items-center gap-4 bg-white p-3 border-2 border-[#111111]">
                   <textarea
                     rows={2}
@@ -494,6 +559,7 @@ export default function ProtocolsTab({
                   </div>
                 )}
               </form>
+              )
             ) : (
               <div className="bg-[#F4F2EE] p-4 border border-gray-300 text-center text-xs font-serif italic text-gray-600">
                 Esta demanda foi encerrada e está bloqueada para novas respostas.
@@ -512,6 +578,52 @@ export default function ProtocolsTab({
           </div>
         )}
       </div>
+
+      {/* Custom Confirmation / Alert Modal */}
+      {modalConfig && modalConfig.isOpen && (
+        <div id="customModal" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div 
+            className="absolute inset-0 bg-black/45 backdrop-blur-xs transition-opacity"
+            onClick={() => setModalConfig(null)}
+          />
+          <div className="relative bg-[#FAF9F6] border border-[#111111] p-6 max-w-md w-full shadow-lg z-10">
+            <h3 className="font-serif italic text-xl text-[#111111] border-b border-[#111111]/10 pb-3 mb-4">
+              {modalConfig.title}
+            </h3>
+            <p className="text-sm text-gray-700 leading-relaxed font-sans mb-6">
+              {modalConfig.message}
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              {modalConfig.isConfirm ? (
+                <>
+                  <button
+                    onClick={() => setModalConfig(null)}
+                    className="px-4 py-2 bg-white hover:bg-gray-100 text-[#111111] text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (modalConfig.onConfirm) modalConfig.onConfirm();
+                      setModalConfig(null);
+                    }}
+                    className="px-4 py-2 bg-[#111111] hover:bg-[#C2A87E] text-white text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                  >
+                    Confirmar
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setModalConfig(null)}
+                  className="px-4 py-2 bg-[#111111] hover:bg-[#C2A87E] text-white text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                >
+                  OK
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

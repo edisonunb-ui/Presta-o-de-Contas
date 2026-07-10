@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { collection, addDoc, doc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../firebase";
-import { User, Administradora, Condominium } from "../types";
+import { User, Administradora, Condominium, UserPermissions } from "../types";
 import { Building2, Shield, UserCog, Plus, Trash2, Key, Users, CheckSquare } from "lucide-react";
 
 interface AdminPanelProps {
@@ -25,6 +25,34 @@ export default function AdminPanel({
     currentUser.role === "SuperADM" ? "adms" : "users"
   );
 
+  // Custom Modal configuration
+  const [modalConfig, setModalConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    isConfirm?: boolean;
+    onConfirm?: () => void;
+  } | null>(null);
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      isConfirm: true,
+      onConfirm,
+    });
+  };
+
+  const showAlert = (title: string, message: string) => {
+    setModalConfig({
+      isOpen: true,
+      title,
+      message,
+      isConfirm: false,
+    });
+  };
+
   // Forms states
   const [admName, setAdmName] = useState("");
   const [condoName, setCondoName] = useState("");
@@ -36,6 +64,151 @@ export default function AdminPanel({
   const [userRole, setUserRole] = useState<"Administrador" | "Sindico">("Sindico");
   const [userAdmId, setUserAdmId] = useState("");
   const [userSelectedCondos, setUserSelectedCondos] = useState<string[]>([]);
+
+  const [userPermissions, setUserPermissions] = useState<Required<UserPermissions>>({
+    folders_view: true,
+    folders_create: false,
+    folders_delete: false,
+    files_view: true,
+    files_upload: false,
+    files_delete: false,
+    protocols_view: true,
+    protocols_create: true,
+    protocols_reply: true,
+    protocols_close: false,
+    register_sindicos: false,
+    register_condos: false,
+    view_audit_logs: false,
+  });
+
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPassword, setEditPassword] = useState("");
+  const [editRole, setEditRole] = useState<"Administrador" | "Sindico">("Sindico");
+  const [editSelectedCondos, setEditSelectedCondos] = useState<string[]>([]);
+  const [editPermissions, setEditPermissions] = useState<Required<UserPermissions>>({
+    folders_view: true,
+    folders_create: false,
+    folders_delete: false,
+    files_view: true,
+    files_upload: false,
+    files_delete: false,
+    protocols_view: true,
+    protocols_create: true,
+    protocols_reply: true,
+    protocols_close: false,
+    register_sindicos: false,
+    register_condos: false,
+    view_audit_logs: false,
+  });
+
+  const getRoleDefaultPermissions = (role: "Administrador" | "Sindico") => {
+    if (role === "Administrador") {
+      return {
+        folders_view: true,
+        folders_create: true,
+        folders_delete: false,
+        files_view: true,
+        files_upload: true,
+        files_delete: false,
+        protocols_view: true,
+        protocols_create: true,
+        protocols_reply: true,
+        protocols_close: true,
+        register_sindicos: true,
+        register_condos: true,
+        view_audit_logs: false,
+      };
+    } else {
+      return {
+        folders_view: true,
+        folders_create: false,
+        folders_delete: false,
+        files_view: true,
+        files_upload: false,
+        files_delete: false,
+        protocols_view: true,
+        protocols_create: true,
+        protocols_reply: true,
+        protocols_close: false,
+        register_sindicos: false,
+        register_condos: false,
+        view_audit_logs: false,
+      };
+    }
+  };
+
+  const handleRoleChange = (role: "Administrador" | "Sindico") => {
+    setUserRole(role);
+    setUserPermissions(getRoleDefaultPermissions(role));
+  };
+
+  const handleStartEditUser = (user: User) => {
+    setEditingUser(user);
+    setEditName(user.name);
+    setEditEmail(user.email);
+    setEditPassword(user.password || "");
+    setEditRole(user.role as "Administrador" | "Sindico");
+    setEditSelectedCondos(user.condominiumIds || []);
+    
+    const defaults = getRoleDefaultPermissions(user.role as "Administrador" | "Sindico");
+    setEditPermissions({
+      folders_view: user.permissions?.folders_view ?? defaults.folders_view,
+      folders_create: user.permissions?.folders_create ?? defaults.folders_create,
+      folders_delete: user.permissions?.folders_delete ?? defaults.folders_delete,
+      files_view: user.permissions?.files_view ?? defaults.files_view,
+      files_upload: user.permissions?.files_upload ?? defaults.files_upload,
+      files_delete: user.permissions?.files_delete ?? defaults.files_delete,
+      protocols_view: user.permissions?.protocols_view ?? defaults.protocols_view,
+      protocols_create: user.permissions?.protocols_create ?? defaults.protocols_create,
+      protocols_reply: user.permissions?.protocols_reply ?? defaults.protocols_reply,
+      protocols_close: user.permissions?.protocols_close ?? defaults.protocols_close,
+      register_sindicos: user.permissions?.register_sindicos ?? defaults.register_sindicos,
+      register_condos: user.permissions?.register_condos ?? defaults.register_condos,
+      view_audit_logs: user.permissions?.view_audit_logs ?? defaults.view_audit_logs,
+    });
+  };
+
+  const handleUpdateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+    if (!editEmail.trim() || !editName.trim()) {
+      showAlert("Aviso", "Por favor, preencha todos os campos obrigatórios.");
+      return;
+    }
+
+    try {
+      const emailExists = usuarios.some(
+        u => u.id !== editingUser.id && u.email.toLowerCase() === editEmail.trim().toLowerCase()
+      );
+      if (emailExists) {
+        showAlert("Erro", "Este e-mail de usuário já está em uso por outro cadastro!");
+        return;
+      }
+
+      await updateDoc(doc(db, "usuarios", editingUser.id), {
+        name: editName.trim(),
+        email: editEmail.trim().toLowerCase(),
+        password: editPassword.trim(),
+        role: editRole,
+        condominiumIds: editRole === "Sindico" ? editSelectedCondos : [],
+        permissions: editPermissions,
+      });
+
+      onAddAuditLog(
+        "Edição de Usuário",
+        `Editou dados/permissões do usuário: ${editName.trim()} (${editRole}) com e-mail: ${editEmail.trim().toLowerCase()}`
+      );
+
+      showAlert("Sucesso", "Usuário atualizado com sucesso!");
+      setEditingUser(null);
+      onRefresh();
+    } catch (error) {
+      console.error(error);
+      showAlert("Erro", "Erro ao atualizar usuário: " + (error instanceof Error ? error.message : String(error)));
+    }
+  };
 
   // Submitting Administradora
   const handleCreateAdm = async (e: React.FormEvent) => {
@@ -57,6 +230,7 @@ export default function AdminPanel({
       onRefresh();
     } catch (error) {
       console.error(error);
+      showAlert("Erro", "Erro ao criar administradora: " + (error instanceof Error ? error.message : String(error)));
     }
   };
 
@@ -65,7 +239,10 @@ export default function AdminPanel({
     e.preventDefault();
     if (!condoName.trim()) return;
     const finalAdmId = currentUser.role === "SuperADM" ? condoAdmId : currentUser.administradoraId;
-    if (!finalAdmId) return;
+    if (!finalAdmId) {
+      showAlert("Aviso", "Por favor, selecione uma administradora para vincular o condomínio.");
+      return;
+    }
 
     try {
       const docRef = await addDoc(collection(db, "condominios"), {
@@ -84,13 +261,17 @@ export default function AdminPanel({
       onRefresh();
     } catch (error) {
       console.error(error);
+      showAlert("Erro", "Erro ao criar condomínio: " + (error instanceof Error ? error.message : String(error)));
     }
   };
 
   // Submitting User
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userEmail.trim() || !userPassword.trim() || !userName.trim()) return;
+    if (!userEmail.trim() || !userPassword.trim() || !userName.trim()) {
+      showAlert("Aviso", "Por favor, preencha todos os campos obrigatórios do usuário.");
+      return;
+    }
     
     const finalAdmId = currentUser.role === "SuperADM" ? userAdmId : currentUser.administradoraId;
 
@@ -100,7 +281,7 @@ export default function AdminPanel({
         u => u.email.toLowerCase() === userEmail.trim().toLowerCase()
       );
       if (emailExists) {
-        alert("Este e-mail de usuário já está cadastrado!");
+        showAlert("Erro", "Este e-mail de usuário já está cadastrado!");
         return;
       }
 
@@ -113,6 +294,7 @@ export default function AdminPanel({
         condominiumIds: userRole === "Sindico" ? userSelectedCondos : [],
         createdAt: new Date().toISOString(),
         firstAccess: true,
+        permissions: userPermissions,
       });
       await updateDoc(doc(db, "usuarios", docRef.id), { id: docRef.id });
 
@@ -125,48 +307,68 @@ export default function AdminPanel({
       setUserPassword("");
       setUserName("");
       setUserSelectedCondos([]);
+      setUserPermissions(getRoleDefaultPermissions("Sindico"));
       onRefresh();
     } catch (error) {
       console.error(error);
+      showAlert("Erro", "Erro ao cadastrar usuário: " + (error instanceof Error ? error.message : String(error)));
     }
   };
 
   // Delete handlers
-  const handleDeleteAdm = async (id: string, name: string) => {
-    if (!confirm(`Tem certeza de que deseja excluir a administradora "${name}"? Isso não excluirá os condomínios vinculados, mas eles ficarão órfãos.`)) return;
-    try {
-      await deleteDoc(doc(db, "administradoras", id));
-      onAddAuditLog("Exclusão de Administradora", `Excluiu a administradora: ${name}`);
-      onRefresh();
-    } catch (error) {
-      console.error(error);
-    }
+  const handleDeleteAdm = (id: string, name: string) => {
+    showConfirm(
+      "Confirmar Exclusão",
+      `Tem certeza de que deseja excluir a administradora "${name}"? Isso não excluirá os condomínios vinculados, mas eles ficarão órfãos.`,
+      async () => {
+        try {
+          await deleteDoc(doc(db, "administradoras", id));
+          onAddAuditLog("Exclusão de Administradora", `Excluiu a administradora: ${name}`);
+          onRefresh();
+        } catch (error) {
+          console.error(error);
+          showAlert("Erro", "Erro ao excluir administradora: " + (error instanceof Error ? error.message : String(error)));
+        }
+      }
+    );
   };
 
-  const handleDeleteCondo = async (id: string, name: string) => {
-    if (!confirm(`Tem certeza de que deseja excluir o condomínio "${name}"?`)) return;
-    try {
-      await deleteDoc(doc(db, "condominios", id));
-      onAddAuditLog("Exclusão de Condomínio", `Excluiu o condomínio: ${name}`);
-      onRefresh();
-    } catch (error) {
-      console.error(error);
-    }
+  const handleDeleteCondo = (id: string, name: string) => {
+    showConfirm(
+      "Confirmar Exclusão",
+      `Tem certeza de que deseja excluir o condomínio "${name}"?`,
+      async () => {
+        try {
+          await deleteDoc(doc(db, "condominios", id));
+          onAddAuditLog("Exclusão de Condomínio", `Excluiu o condomínio: ${name}`);
+          onRefresh();
+        } catch (error) {
+          console.error(error);
+          showAlert("Erro", "Erro ao excluir condomínio: " + (error instanceof Error ? error.message : String(error)));
+        }
+      }
+    );
   };
 
-  const handleDeleteUser = async (id: string, name: string, email: string) => {
+  const handleDeleteUser = (id: string, name: string, email: string) => {
     if (id === currentUser.id) {
-      alert("Você não pode excluir a si mesmo!");
+      showAlert("Aviso", "Você não pode excluir a si mesmo!");
       return;
     }
-    if (!confirm(`Tem certeza de que deseja excluir o usuário "${name}" (${email})?`)) return;
-    try {
-      await deleteDoc(doc(db, "usuarios", id));
-      onAddAuditLog("Exclusão de Usuário", `Excluiu o usuário: ${name} (${email})`);
-      onRefresh();
-    } catch (error) {
-      console.error(error);
-    }
+    showConfirm(
+      "Confirmar Exclusão",
+      `Tem certeza de que deseja excluir o usuário "${name}" (${email})?`,
+      async () => {
+        try {
+          await deleteDoc(doc(db, "usuarios", id));
+          onAddAuditLog("Exclusão de Usuário", `Excluiu o usuário: ${name} (${email})`);
+          onRefresh();
+        } catch (error) {
+          console.error(error);
+          showAlert("Erro", "Erro ao excluir usuário: " + (error instanceof Error ? error.message : String(error)));
+        }
+      }
+    );
   };
 
   const toggleCondoSelection = (condoId: string) => {
@@ -470,13 +672,13 @@ export default function AdminPanel({
                   </label>
                   <select
                     value={userRole}
-                    onChange={(e) => setUserRole(e.target.value as "Administrador" | "Sindico")}
+                    onChange={(e) => handleRoleChange(e.target.value as "Administrador" | "Sindico")}
                     className="w-full px-3 py-2 border border-[#111111] rounded-none bg-white text-sm outline-none focus:bg-[#F4F2EE]"
                     required
                   >
-                    <option value="Sindico">Síndico (Apenas Visualização)</option>
+                    <option value="Sindico">Síndico (Apenas Visualização por padrão)</option>
                     {currentUser.role === "SuperADM" && (
-                      <option value="Administrador">Administrador (Gestor)</option>
+                      <option value="Administrador">Administrador (Gestor por padrão)</option>
                     )}
                   </select>
                 </div>
@@ -529,6 +731,240 @@ export default function AdminPanel({
                           </label>
                         ))
                       )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Permissões Granulares (Super ADM) */}
+                {currentUser.role === "SuperADM" && (
+                  <div className="border border-[#111111] p-4 space-y-4 bg-stone-50">
+                    <div>
+                      <p className="text-[10px] uppercase font-bold tracking-wider text-[#111111]">
+                        Configuração de Permissões Granulares
+                      </p>
+                      <p className="text-[9px] text-gray-500 font-serif italic mt-0.5">
+                        Defina em detalhe as ações permitidas para este perfil.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                      {/* Topic 1: Pastas */}
+                      <div className="space-y-1.5 border border-gray-200 p-2.5 bg-white">
+                        <span className="font-bold font-serif italic text-[#C2A87E] text-[11px] block border-b border-gray-100 pb-1">
+                          1. Pastas do Condomínio
+                        </span>
+                        <div className="space-y-1 pl-1">
+                          <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={userPermissions.folders_view}
+                              onChange={(e) =>
+                                setUserPermissions({
+                                  ...userPermissions,
+                                  folders_view: e.target.checked,
+                                })
+                              }
+                              className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                            />
+                            <span>Visualizar Pastas</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={userPermissions.folders_create}
+                              onChange={(e) =>
+                                setUserPermissions({
+                                  ...userPermissions,
+                                  folders_create: e.target.checked,
+                                })
+                              }
+                              className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                            />
+                            <span>Criar Novas Pastas</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={userPermissions.folders_delete}
+                              onChange={(e) =>
+                                setUserPermissions({
+                                  ...userPermissions,
+                                  folders_delete: e.target.checked,
+                                })
+                              }
+                              className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                            />
+                            <span>Excluir Pastas</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Topic 2: Arquivos */}
+                      <div className="space-y-1.5 border border-gray-200 p-2.5 bg-white">
+                        <span className="font-bold font-serif italic text-[#C2A87E] text-[11px] block border-b border-gray-100 pb-1">
+                          2. Arquivos e Documentos
+                        </span>
+                        <div className="space-y-1 pl-1">
+                          <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={userPermissions.files_view}
+                              onChange={(e) =>
+                                setUserPermissions({
+                                  ...userPermissions,
+                                  files_view: e.target.checked,
+                                })
+                              }
+                              className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                            />
+                            <span>Visualizar / Baixar</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={userPermissions.files_upload}
+                              onChange={(e) =>
+                                setUserPermissions({
+                                  ...userPermissions,
+                                  files_upload: e.target.checked,
+                                })
+                              }
+                              className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                            />
+                            <span>Enviar / Subir Arquivos</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={userPermissions.files_delete}
+                              onChange={(e) =>
+                                setUserPermissions({
+                                  ...userPermissions,
+                                  files_delete: e.target.checked,
+                                })
+                              }
+                              className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                            />
+                            <span>Excluir Arquivos</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Topic 3: Protocolos */}
+                      <div className="space-y-1.5 border border-gray-200 p-2.5 bg-white">
+                        <span className="font-bold font-serif italic text-[#C2A87E] text-[11px] block border-b border-gray-100 pb-1">
+                          3. Atendimentos & Chamados
+                        </span>
+                        <div className="space-y-1 pl-1">
+                          <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={userPermissions.protocols_view}
+                              onChange={(e) =>
+                                setUserPermissions({
+                                  ...userPermissions,
+                                  protocols_view: e.target.checked,
+                                })
+                              }
+                              className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                            />
+                            <span>Visualizar Chamados</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={userPermissions.protocols_create}
+                              onChange={(e) =>
+                                setUserPermissions({
+                                  ...userPermissions,
+                                  protocols_create: e.target.checked,
+                                })
+                              }
+                              className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                            />
+                            <span>Abrir Novos Chamados</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={userPermissions.protocols_reply}
+                              onChange={(e) =>
+                                setUserPermissions({
+                                  ...userPermissions,
+                                  protocols_reply: e.target.checked,
+                                })
+                              }
+                              className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                            />
+                            <span>Responder / Interagir</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={userPermissions.protocols_close}
+                              onChange={(e) =>
+                                setUserPermissions({
+                                  ...userPermissions,
+                                  protocols_close: e.target.checked,
+                                })
+                              }
+                              className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                            />
+                            <span>Encerrar Chamados</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      {/* Topic 4: Cadastros */}
+                      <div className="space-y-1.5 border border-gray-200 p-2.5 bg-white">
+                        <span className="font-bold font-serif italic text-[#C2A87E] text-[11px] block border-b border-gray-100 pb-1">
+                          4. Cadastros & Gestão
+                        </span>
+                        <div className="space-y-1 pl-1">
+                          <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={userPermissions.register_sindicos}
+                              onChange={(e) =>
+                                setUserPermissions({
+                                  ...userPermissions,
+                                  register_sindicos: e.target.checked,
+                                })
+                              }
+                              className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                            />
+                            <span>Cadastrar Síndicos</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={userPermissions.register_condos}
+                              onChange={(e) =>
+                                setUserPermissions({
+                                  ...userPermissions,
+                                  register_condos: e.target.checked,
+                                })
+                              }
+                              className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                            />
+                            <span>Cadastrar Condomínios</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={userPermissions.view_audit_logs}
+                              onChange={(e) =>
+                                setUserPermissions({
+                                  ...userPermissions,
+                                  view_audit_logs: e.target.checked,
+                                })
+                              }
+                              className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                            />
+                            <span>Visualizar Auditoria</span>
+                          </label>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -589,7 +1025,11 @@ export default function AdminPanel({
                                 : "bg-green-50 text-green-700 border-green-200"
                             }`}
                           >
-                            [{u.role}]
+                            {u.role === "SuperADM"
+                              ? "Super ADM"
+                              : u.role === "Administrador"
+                              ? "Administradora"
+                              : "Síndico"}
                           </span>
                         </td>
                         <td className="py-4 px-4 text-xs text-gray-600">
@@ -614,8 +1054,15 @@ export default function AdminPanel({
                         </td>
                         <td className="py-4 px-4 text-right">
                           <button
+                            onClick={() => handleStartEditUser(u)}
+                            className="text-[#111111] hover:text-[#C2A87E] p-1.5 border border-transparent hover:border-gray-200 transition-colors mr-2 cursor-pointer"
+                            title="Editar Permissões e Dados"
+                          >
+                            <UserCog className="w-4 h-4" />
+                          </button>
+                          <button
                             onClick={() => handleDeleteUser(u.id, u.name, u.email)}
-                            className="text-red-700 hover:text-red-950 p-1.5 border border-transparent hover:border-red-200 transition-colors"
+                            className="text-red-700 hover:text-red-950 p-1.5 border border-transparent hover:border-red-200 transition-colors cursor-pointer"
                             disabled={u.id === currentUser.id}
                             title={u.id === currentUser.id ? "Você não pode se excluir" : "Excluir"}
                           >
@@ -627,6 +1074,423 @@ export default function AdminPanel({
                   })}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EDITAR USUÁRIO & PERMISSÕES */}
+      {editingUser && (
+        <div id="editUserModal" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div 
+            className="absolute inset-0 bg-black/45 backdrop-blur-xs transition-opacity"
+            onClick={() => setEditingUser(null)}
+          />
+          <div className="relative bg-[#FAF9F6] border border-[#111111] p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-lg z-10 space-y-6">
+            <div className="border-b border-[#111111]/10 pb-3 flex justify-between items-center">
+              <h3 className="font-serif italic text-xl text-[#111111]">
+                Editar Usuário: {editingUser.name}
+              </h3>
+              <button
+                onClick={() => setEditingUser(null)}
+                className="text-gray-400 hover:text-[#111111] text-xs uppercase font-bold tracking-widest transition-all cursor-pointer"
+              >
+                [Fechar]
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateUser} className="space-y-4">
+              <div>
+                <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-1.5">
+                  Nome Completo
+                </label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full px-3 py-2 border border-[#111111] rounded-none bg-white text-sm outline-none focus:bg-[#F4F2EE]"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-1.5">
+                    E-mail (Acesso)
+                  </label>
+                  <input
+                    type="email"
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    className="w-full px-3 py-2 border border-[#111111] rounded-none bg-white text-sm outline-none focus:bg-[#F4F2EE]"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-1.5">
+                    Senha Provisória / Atual
+                  </label>
+                  <input
+                    type="text"
+                    value={editPassword}
+                    onChange={(e) => setEditPassword(e.target.value)}
+                    className="w-full px-3 py-2 border border-[#111111] rounded-none bg-white text-sm outline-none focus:bg-[#F4F2EE]"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-1.5">
+                  Tipo de Permissão
+                </label>
+                <select
+                  value={editRole}
+                  onChange={(e) => {
+                    const nextRole = e.target.value as "Administrador" | "Sindico";
+                    setEditRole(nextRole);
+                    setEditPermissions(getRoleDefaultPermissions(nextRole));
+                  }}
+                  className="w-full px-3 py-2 border border-[#111111] rounded-none bg-white text-sm outline-none focus:bg-[#F4F2EE]"
+                  required
+                >
+                  <option value="Sindico">Síndico (Apenas Visualização por padrão)</option>
+                  <option value="Administrador">Administrador (Gestor por padrão)</option>
+                </select>
+              </div>
+
+              {editRole === "Sindico" && (
+                <div>
+                  <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-1">
+                    Liberar Acesso aos Condomínios:
+                  </label>
+                  <p className="text-[10px] text-gray-500 mb-2 font-serif italic">
+                    O síndico só visualizará as pastas dos condomínios marcados abaixo.
+                  </p>
+                  <div className="max-h-32 overflow-y-auto border border-[#111111] p-2 space-y-1.5 bg-[#F9F8F6]">
+                    {visibleCondos.length === 0 ? (
+                      <p className="text-xs text-gray-400 p-2 font-serif italic">Nenhum condomínio cadastrado.</p>
+                    ) : (
+                      visibleCondos.map((c) => (
+                        <label
+                          key={c.id}
+                          className="flex items-center gap-2 p-1.5 hover:bg-white border border-transparent hover:border-gray-200 transition-colors cursor-pointer text-xs font-bold text-gray-800"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={editSelectedCondos.includes(c.id)}
+                            onChange={() => {
+                              if (editSelectedCondos.includes(c.id)) {
+                                setEditSelectedCondos(editSelectedCondos.filter(id => id !== c.id));
+                              } else {
+                                setEditSelectedCondos([...editSelectedCondos, c.id]);
+                              }
+                            }}
+                            className="accent-[#111111] rounded-none h-4 w-4 border-[#111111]"
+                          />
+                          {c.name}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Permissões Granulares (Super ADM) */}
+              {currentUser.role === "SuperADM" && (
+                <div className="border border-[#111111] p-3 space-y-4 bg-[#F9F8F6]">
+                  <div>
+                    <p className="text-[10px] uppercase font-bold tracking-wider text-[#111111]">
+                      Configuração de Permissões Granulares
+                    </p>
+                    <p className="text-[9px] text-gray-500 font-serif italic mt-0.5">
+                      Personalize detalhadamente as permissões deste usuário.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                    {/* Topic 1: Pastas */}
+                    <div className="space-y-1.5 border border-gray-200 p-2 bg-white">
+                      <span className="font-bold font-serif italic text-[#C2A87E] text-[11px] block border-b border-gray-100 pb-0.5">
+                        1. Pastas do Condomínio
+                      </span>
+                      <div className="space-y-1 pl-1">
+                        <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={editPermissions.folders_view}
+                            onChange={(e) =>
+                              setEditPermissions({
+                                ...editPermissions,
+                                folders_view: e.target.checked,
+                              })
+                            }
+                            className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                          />
+                          <span>Visualizar Pastas</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={editPermissions.folders_create}
+                            onChange={(e) =>
+                              setEditPermissions({
+                                ...editPermissions,
+                                folders_create: e.target.checked,
+                              })
+                            }
+                            className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                          />
+                          <span>Criar Pastas</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={editPermissions.folders_delete}
+                            onChange={(e) =>
+                              setEditPermissions({
+                                ...editPermissions,
+                                folders_delete: e.target.checked,
+                              })
+                            }
+                            className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                          />
+                          <span>Excluir Pastas</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Topic 2: Arquivos */}
+                    <div className="space-y-1.5 border border-gray-200 p-2 bg-white">
+                      <span className="font-bold font-serif italic text-[#C2A87E] text-[11px] block border-b border-gray-100 pb-0.5">
+                        2. Arquivos e Documentos
+                      </span>
+                      <div className="space-y-1 pl-1">
+                        <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={editPermissions.files_view}
+                            onChange={(e) =>
+                              setEditPermissions({
+                                ...editPermissions,
+                                files_view: e.target.checked,
+                              })
+                            }
+                            className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                          />
+                          <span>Visualizar / Baixar</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={editPermissions.files_upload}
+                            onChange={(e) =>
+                              setEditPermissions({
+                                ...editPermissions,
+                                files_upload: e.target.checked,
+                              })
+                            }
+                            className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                          />
+                          <span>Enviar / Subir</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={editPermissions.files_delete}
+                            onChange={(e) =>
+                              setEditPermissions({
+                                ...editPermissions,
+                                files_delete: e.target.checked,
+                              })
+                            }
+                            className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                          />
+                          <span>Excluir Arquivos</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Topic 3: Protocolos */}
+                    <div className="space-y-1.5 border border-gray-200 p-2 bg-white">
+                      <span className="font-bold font-serif italic text-[#C2A87E] text-[11px] block border-b border-gray-100 pb-0.5">
+                        3. Atendimentos & Chamados
+                      </span>
+                      <div className="space-y-1 pl-1">
+                        <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={editPermissions.protocols_view}
+                            onChange={(e) =>
+                              setEditPermissions({
+                                ...editPermissions,
+                                protocols_view: e.target.checked,
+                              })
+                            }
+                            className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                          />
+                          <span>Visualizar Chamados</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={editPermissions.protocols_create}
+                            onChange={(e) =>
+                              setEditPermissions({
+                                ...editPermissions,
+                                protocols_create: e.target.checked,
+                              })
+                            }
+                            className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                          />
+                          <span>Abrir Chamados</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={editPermissions.protocols_reply}
+                            onChange={(e) =>
+                              setEditPermissions({
+                                ...editPermissions,
+                                protocols_reply: e.target.checked,
+                              })
+                            }
+                            className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                          />
+                          <span>Responder / Interagir</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={editPermissions.protocols_close}
+                            onChange={(e) =>
+                              setEditPermissions({
+                                ...editPermissions,
+                                protocols_close: e.target.checked,
+                              })
+                            }
+                            className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                          />
+                          <span>Encerrar Chamados</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* Topic 4: Cadastros */}
+                    <div className="space-y-1.5 border border-gray-200 p-2 bg-white">
+                      <span className="font-bold font-serif italic text-[#C2A87E] text-[11px] block border-b border-gray-100 pb-0.5">
+                        4. Cadastros & Gestão
+                      </span>
+                      <div className="space-y-1 pl-1">
+                        <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={editPermissions.register_sindicos}
+                            onChange={(e) =>
+                              setEditPermissions({
+                                ...editPermissions,
+                                register_sindicos: e.target.checked,
+                              })
+                            }
+                            className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                          />
+                          <span>Cadastrar Síndicos</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={editPermissions.register_condos}
+                            onChange={(e) =>
+                              setEditPermissions({
+                                ...editPermissions,
+                                register_condos: e.target.checked,
+                              })
+                            }
+                            className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                          />
+                          <span>Cadastrar Condomínios</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer py-0.5">
+                          <input
+                            type="checkbox"
+                            checked={editPermissions.view_audit_logs}
+                            onChange={(e) =>
+                              setEditPermissions({
+                                ...editPermissions,
+                                view_audit_logs: e.target.checked,
+                              })
+                            }
+                            className="accent-[#111111] h-3.5 w-3.5 rounded-none"
+                          />
+                          <span>Visualizar Auditoria</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setEditingUser(null)}
+                  className="px-4 py-2 bg-white hover:bg-gray-100 text-[#111111] text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-[#111111] hover:bg-[#C2A87E] text-white text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                >
+                  Salvar Alterações
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Confirmation / Alert Modal */}
+      {modalConfig && modalConfig.isOpen && (
+        <div id="customModal" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div 
+            className="absolute inset-0 bg-black/45 backdrop-blur-xs transition-opacity"
+            onClick={() => setModalConfig(null)}
+          />
+          <div className="relative bg-[#FAF9F6] border border-[#111111] p-6 max-w-md w-full shadow-lg z-10">
+            <h3 className="font-serif italic text-xl text-[#111111] border-b border-[#111111]/10 pb-3 mb-4">
+              {modalConfig.title}
+            </h3>
+            <p className="text-sm text-gray-700 leading-relaxed font-sans mb-6">
+              {modalConfig.message}
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              {modalConfig.isConfirm ? (
+                <>
+                  <button
+                    onClick={() => setModalConfig(null)}
+                    className="px-4 py-2 bg-white hover:bg-gray-100 text-[#111111] text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (modalConfig.onConfirm) modalConfig.onConfirm();
+                      setModalConfig(null);
+                    }}
+                    className="px-4 py-2 bg-[#111111] hover:bg-[#C2A87E] text-white text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                  >
+                    Confirmar
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setModalConfig(null)}
+                  className="px-4 py-2 bg-[#111111] hover:bg-[#C2A87E] text-white text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                >
+                  OK
+                </button>
+              )}
             </div>
           </div>
         </div>

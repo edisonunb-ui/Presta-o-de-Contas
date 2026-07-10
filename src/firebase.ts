@@ -13,5 +13,5 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 
 // Initialize Firestore with the specific databaseId from the configuration
-export const db = getFirestore(app, "ai-studio-4aac8b58-6a44-4173-85a1-a7b0d01e859e");
+export const db = getFirestore(app, "ai-studio-portaldeprestaod-4aac8b58-6a44-4173-85a1-a7b0d01e859e");
 

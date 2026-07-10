@@ -68,6 +68,7 @@ export default function App() {
   // UI state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSeeding, setIsSeeding] = useState(true);
+  const [dbError, setDbError] = useState<string>("");
 
   // Registration handler
   const handleRegister = async (e: React.FormEvent) => {
@@ -201,6 +202,7 @@ export default function App() {
         await seedDatabaseIfEmpty();
       } catch (err) {
         console.error("Seeding error:", err);
+        setDbError("Erro ao inicializar banco: " + (err instanceof Error ? err.message : String(err)));
       } finally {
         setIsSeeding(false);
       }
@@ -211,65 +213,89 @@ export default function App() {
     const unsubUsers = onSnapshot(collection(db, "usuarios"), (snapshot) => {
       const list: User[] = [];
       snapshot.forEach((doc) => {
-        list.push(doc.data() as User);
+        list.push({ ...doc.data(), id: doc.id } as User);
       });
       setUsuarios(list);
+    }, (error) => {
+      console.error("Users load error:", error);
+      setDbError("Erro de acesso ao banco (usuarios): " + error.message);
     });
 
     const unsubAdms = onSnapshot(collection(db, "administradoras"), (snapshot) => {
       const list: Administradora[] = [];
       snapshot.forEach((doc) => {
-        list.push(doc.data() as Administradora);
+        list.push({ ...doc.data(), id: doc.id } as Administradora);
       });
       setAdministradoras(list);
+    }, (error) => {
+      console.error("Adms load error:", error);
+      setDbError("Erro de acesso ao banco (administradoras): " + error.message);
     });
 
     const unsubCondos = onSnapshot(collection(db, "condominios"), (snapshot) => {
       const list: Condominium[] = [];
       snapshot.forEach((doc) => {
-        list.push(doc.data() as Condominium);
+        list.push({ ...doc.data(), id: doc.id } as Condominium);
       });
       setCondominios(list);
+    }, (error) => {
+      console.error("Condos load error:", error);
+      setDbError("Erro de acesso ao banco (condominios): " + error.message);
     });
 
     const unsubPastas = onSnapshot(collection(db, "pastas"), (snapshot) => {
       const list: Folder[] = [];
       snapshot.forEach((doc) => {
-        list.push(doc.data() as Folder);
+        list.push({ ...doc.data(), id: doc.id } as Folder);
       });
       setFolders(list);
+    }, (error) => {
+      console.error("Pastas load error:", error);
+      setDbError("Erro de acesso ao banco (pastas): " + error.message);
     });
 
     const unsubArquivos = onSnapshot(collection(db, "arquivos"), (snapshot) => {
       const list: FileEntry[] = [];
       snapshot.forEach((doc) => {
-        list.push(doc.data() as FileEntry);
+        list.push({ ...doc.data(), id: doc.id } as FileEntry);
       });
       setFiles(list);
+    }, (error) => {
+      console.error("Arquivos load error:", error);
+      setDbError("Erro de acesso ao banco (arquivos): " + error.message);
     });
 
     const unsubProtos = onSnapshot(collection(db, "protocolos"), (snapshot) => {
       const list: Protocol[] = [];
       snapshot.forEach((doc) => {
-        list.push(doc.data() as Protocol);
+        list.push({ ...doc.data(), id: doc.id } as Protocol);
       });
       setProtocols(list);
+    }, (error) => {
+      console.error("Protocolos load error:", error);
+      setDbError("Erro de acesso ao banco (protocolos): " + error.message);
     });
 
     const unsubMsgs = onSnapshot(collection(db, "mensagens"), (snapshot) => {
       const list: Message[] = [];
       snapshot.forEach((doc) => {
-        list.push(doc.data() as Message);
+        list.push({ ...doc.data(), id: doc.id } as Message);
       });
       setMessages(list);
+    }, (error) => {
+      console.error("Mensagens load error:", error);
+      setDbError("Erro de acesso ao banco (mensagens): " + error.message);
     });
 
     const unsubAudit = onSnapshot(collection(db, "auditoria"), (snapshot) => {
       const list: AuditLog[] = [];
       snapshot.forEach((doc) => {
-        list.push(doc.data() as AuditLog);
+        list.push({ ...doc.data(), id: doc.id } as AuditLog);
       });
       setAuditLogs(list);
+    }, (error) => {
+      console.error("Auditoria load error:", error);
+      setDbError("Erro de acesso ao banco (auditoria): " + error.message);
     });
 
     return () => {
@@ -379,7 +405,14 @@ export default function App() {
 
   // Current selected condominium object
   const selectedCondominium = condominios.find((c) => c.id === selectedCondominiumId);
-  const selectedCondoName = selectedCondominium ? selectedCondominium.name : "Selecione um condomínio";
+  let selectedCondoName = selectedCondominium ? selectedCondominium.name : "Selecione um condomínio";
+  if (!selectedCondominiumId) {
+    if (activeTab === "admin") {
+      selectedCondoName = "Painel de Administração Global";
+    } else if (activeTab === "audit") {
+      selectedCondoName = "Painel de Auditoria Geral";
+    }
+  }
 
   // Administradora name for current user
   const currentUserAdmName = currentUser?.administradoraId
@@ -622,6 +655,13 @@ export default function App() {
                     {loginError && (
                       <div className="p-3 text-xs font-serif italic text-red-700 bg-red-50 border border-red-200 rounded-lg">
                         {loginError}
+                      </div>
+                    )}
+
+                    {dbError && (
+                      <div className="p-3 text-xs font-mono text-red-700 bg-red-50 border border-red-200 rounded-lg whitespace-pre-wrap">
+                        <strong>Erro de Banco de Dados:</strong><br />
+                        {dbError}
                       </div>
                     )}
 
@@ -875,6 +915,24 @@ export default function App() {
       {/* WORKSPACE CONTENT AREA */}
       <main id="workspaceArea" className="flex-1 flex flex-col h-full min-w-0 overflow-y-auto">
         
+        {dbError && (
+          <div className="bg-red-50 border-b border-red-200 text-red-800 px-8 py-3 text-xs font-medium flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse"></span>
+              <span><strong>Aviso de Conexão:</strong> {dbError}</span>
+            </div>
+            <button 
+              onClick={() => {
+                setDbError("");
+                window.location.reload();
+              }} 
+              className="underline text-red-900 hover:text-red-950 font-bold bg-transparent border-none cursor-pointer"
+            >
+              Recarregar Sistema
+            </button>
+          </div>
+        )}
+        
         {/* Dynamic header depending on condominium selection */}
         <header className="border-b border-[#123E33] p-8 md:p-10 flex flex-col sm:flex-row sm:items-baseline justify-between gap-4 bg-white">
           <div className="space-y-1">
@@ -889,31 +947,35 @@ export default function App() {
           </div>
         </header>
 
-        {selectedCondominiumId && (
+        {(selectedCondominiumId || currentUser.role === "SuperADM" || currentUser.role === "Administrador") && (
           <div className="bg-[#EEF2F0] border-b border-[#123E33] px-6 py-3 flex flex-wrap gap-2">
-            <button
-              id="foldersTab"
-              onClick={() => setActiveTab("folders")}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
-                activeTab === "folders"
-                  ? "bg-[#123E33] text-white border-[#123E33]"
-                  : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
-              }`}
-            >
-              <FolderKanban className="w-4 h-4" /> Pastas
-            </button>
-            <button
-              id="protocolsTab"
-              onClick={() => setActiveTab("protocols")}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
-                activeTab === "protocols"
-                  ? "bg-[#123E33] text-white border-[#123E33]"
-                  : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
-              }`}
-            >
-              <HelpCircle className="w-4 h-4" /> Protocolos
-            </button>
-            {currentUser.role === "SuperADM" && (
+            {selectedCondominiumId && (
+              <>
+                <button
+                  id="foldersTab"
+                  onClick={() => setActiveTab("folders")}
+                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
+                    activeTab === "folders"
+                      ? "bg-[#123E33] text-white border-[#123E33]"
+                      : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
+                  }`}
+                >
+                  <FolderKanban className="w-4 h-4" /> Pastas
+                </button>
+                <button
+                  id="protocolsTab"
+                  onClick={() => setActiveTab("protocols")}
+                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
+                    activeTab === "protocols"
+                      ? "bg-[#123E33] text-white border-[#123E33]"
+                      : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
+                  }`}
+                >
+                  <HelpCircle className="w-4 h-4" /> Protocolos
+                </button>
+              </>
+            )}
+            {(currentUser.role === "SuperADM" || currentUser.role === "Administrador") && (
               <button
                 id="adminTab"
                 onClick={() => setActiveTab("admin")}
@@ -942,10 +1004,10 @@ export default function App() {
 
         {/* WORKSPACE VIEWS */}
         <div className="flex-1 p-6 md:p-8 bg-[#FAF9F6]">
-          {selectedCondominiumId ? (
+          {(selectedCondominiumId || activeTab === "admin" || activeTab === "audit") ? (
             <div className="h-full">
               {/* TABS VIEW RENDER */}
-              {activeTab === "folders" && (
+              {activeTab === "folders" && selectedCondominiumId && (
                 <FoldersTab
                   currentUser={currentUser}
                   selectedCondominiumId={selectedCondominiumId}
@@ -957,7 +1019,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === "protocols" && (
+              {activeTab === "protocols" && selectedCondominiumId && (
                 <ProtocolsTab
                   currentUser={currentUser}
                   selectedCondominiumId={selectedCondominiumId}
@@ -969,7 +1031,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === "admin" && currentUser.role === "SuperADM" && (
+              {activeTab === "admin" && (currentUser.role === "SuperADM" || currentUser.role === "Administrador") && (
                 <AdminPanel
                   currentUser={currentUser}
                   administradoras={administradoras}
@@ -999,17 +1061,12 @@ export default function App() {
                 Selecione um condomínio na barra lateral para acessar as pastas mensais de prestação de contas, fazer downloads de relatórios ou abrir chamados/demandas técnicas.
               </p>
 
-              {currentUser.role === "SuperADM" && (
+              {(currentUser.role === "SuperADM" || currentUser.role === "Administrador") && (
                 <div className="mt-8 pt-6 border-t border-[#123E33]/20 w-full max-w-sm">
                   <p className="text-[10px] uppercase font-bold tracking-widest opacity-60 mb-3">Acesso Administrativo:</p>
                   <button
                     onClick={() => {
-                      if (visibleCondos.length > 0) {
-                        setSelectedCondominiumId(visibleCondos[0].id);
-                        setActiveTab("admin");
-                      } else {
-                        alert("Por favor, crie uma administradora ou condomínio primeiro!");
-                      }
+                      setActiveTab("admin");
                     }}
                     className="border-2 border-[#123E33] text-[#123E33] hover:bg-[#123E33] hover:text-white text-[11px] uppercase font-bold tracking-widest px-6 py-2.5 transition-all cursor-pointer inline-flex items-center gap-2"
                   >

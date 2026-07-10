@@ -11,6 +11,25 @@ export interface Condominium {
   createdAt: string;
 }
 
+export interface UserPermissions {
+  folders_view?: boolean;
+  folders_create?: boolean;
+  folders_delete?: boolean;
+  
+  files_view?: boolean;
+  files_upload?: boolean;
+  files_delete?: boolean;
+  
+  protocols_view?: boolean;
+  protocols_create?: boolean;
+  protocols_reply?: boolean;
+  protocols_close?: boolean;
+  
+  register_sindicos?: boolean;
+  register_condos?: boolean;
+  view_audit_logs?: boolean;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -21,6 +40,7 @@ export interface User {
   condominiumIds?: string[]; // link to Condominium IDs (especially for Sindico)
   createdAt: string;
   firstAccess?: boolean; // force password change on first login
+  permissions?: UserPermissions;
 }
 
 export interface Folder {
@@ -28,6 +48,7 @@ export interface Folder {
   condominiumId: string;
   year: number;
   month: number;
+  name?: string;
   createdAt: string;
 }
 
