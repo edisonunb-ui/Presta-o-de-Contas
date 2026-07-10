@@ -6,23 +6,23 @@ export async function seedDatabaseIfEmpty() {
     const usersCol = collection(db, "usuarios");
     const usersSnapshot = await getDocs(usersCol);
     
-    // Garantir que edisonunb@gmail.com como SuperADM sempre exista
-    const edisonExists = usersSnapshot.docs.some(
+    // Garantir que edisonunb@gmail.com como SuperADM sempre exista e tenha a senha correta
+    const edisonDoc = usersSnapshot.docs.find(
       doc => doc.data().email?.toLowerCase() === "edisonunb@gmail.com"
     );
-    if (!edisonExists) {
-      const userSuperId = "user_super_adm";
-      await setDoc(doc(db, "usuarios", userSuperId), {
-        id: userSuperId,
-        email: "edisonunb@gmail.com",
-        password: "123mudar",
-        name: "Edison Nunes (SuperADM)",
-        role: "SuperADM",
-        firstAccess: true,
-        createdAt: new Date().toISOString()
-      }, { merge: true });
-      console.log("SuperADM edisonunb@gmail.com garantido/criado com sucesso!");
-    }
+    const userSuperId = edisonDoc ? edisonDoc.id : "user_super_adm";
+    
+    // Forçamos a senha e a regra de primeiro acesso para garantir o login inicial dele
+    await setDoc(doc(db, "usuarios", userSuperId), {
+      id: userSuperId,
+      email: "edisonunb@gmail.com",
+      password: "123mudar",
+      name: "Edison Nunes (SuperADM)",
+      role: "SuperADM",
+      firstAccess: true,
+      createdAt: new Date().toISOString()
+    }, { merge: true });
+    console.log("SuperADM edisonunb@gmail.com garantido/criado com sucesso!");
 
     if (!usersSnapshot.empty) {
       console.log("Database already initialized, skipping seed.");
@@ -81,10 +81,10 @@ export async function seedDatabaseIfEmpty() {
 
     // 3. Create Users
     // SuperADM - Edison Nunes
-    const userSuperId = "user_super_adm";
-    const superRef = doc(db, "usuarios", userSuperId);
+    const seedSuperId = "user_super_adm";
+    const superRef = doc(db, "usuarios", seedSuperId);
     batch.set(superRef, {
-      id: userSuperId,
+      id: seedSuperId,
       email: "edisonunb@gmail.com",
       password: "123mudar",
       name: "Edison Nunes (SuperADM)",

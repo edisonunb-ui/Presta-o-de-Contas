@@ -633,17 +633,7 @@ export default function App() {
                     </button>
                   </form>
 
-                  <div className="text-center pt-3 border-t border-gray-100">
-                    <button
-                      onClick={() => {
-                        setIsRegistering(true);
-                        setLoginError("");
-                      }}
-                      className="text-xs text-[#123E33] font-bold underline hover:text-[#C2A87E] transition-colors cursor-pointer"
-                    >
-                      Não tem uma conta? Cadastre-se aqui
-                    </button>
-                  </div>
+                  {/* Apenas o SuperADM pode cadastrar novos usuários internamente */}
                 </>
               )}
 
@@ -923,7 +913,7 @@ export default function App() {
             >
               <HelpCircle className="w-4 h-4" /> Protocolos
             </button>
-            {(currentUser.role === "SuperADM" || currentUser.role === "Administrador") && (
+            {currentUser.role === "SuperADM" && (
               <button
                 id="adminTab"
                 onClick={() => setActiveTab("admin")}
@@ -979,7 +969,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === "admin" && (currentUser.role === "SuperADM" || currentUser.role === "Administrador") && (
+              {activeTab === "admin" && currentUser.role === "SuperADM" && (
                 <AdminPanel
                   currentUser={currentUser}
                   administradoras={administradoras}
@@ -1009,7 +999,7 @@ export default function App() {
                 Selecione um condomínio na barra lateral para acessar as pastas mensais de prestação de contas, fazer downloads de relatórios ou abrir chamados/demandas técnicas.
               </p>
 
-              {(currentUser.role === "SuperADM" || currentUser.role === "Administrador") && (
+              {currentUser.role === "SuperADM" && (
                 <div className="mt-8 pt-6 border-t border-[#123E33]/20 w-full max-w-sm">
                   <p className="text-[10px] uppercase font-bold tracking-widest opacity-60 mb-3">Acesso Administrativo:</p>
                   <button
