@@ -6,6 +6,24 @@ export async function seedDatabaseIfEmpty() {
     const usersCol = collection(db, "usuarios");
     const usersSnapshot = await getDocs(usersCol);
     
+    // Garantir que edisonunb@gmail.com como SuperADM sempre exista
+    const edisonExists = usersSnapshot.docs.some(
+      doc => doc.data().email?.toLowerCase() === "edisonunb@gmail.com"
+    );
+    if (!edisonExists) {
+      const userSuperId = "user_super_adm";
+      await setDoc(doc(db, "usuarios", userSuperId), {
+        id: userSuperId,
+        email: "edisonunb@gmail.com",
+        password: "123mudar",
+        name: "Edison Nunes (SuperADM)",
+        role: "SuperADM",
+        firstAccess: true,
+        createdAt: new Date().toISOString()
+      }, { merge: true });
+      console.log("SuperADM edisonunb@gmail.com garantido/criado com sucesso!");
+    }
+
     if (!usersSnapshot.empty) {
       console.log("Database already initialized, skipping seed.");
       return;
@@ -67,10 +85,11 @@ export async function seedDatabaseIfEmpty() {
     const superRef = doc(db, "usuarios", userSuperId);
     batch.set(superRef, {
       id: userSuperId,
-      email: "admin@portal.local",
-      password: "admin123",
+      email: "edisonunb@gmail.com",
+      password: "123mudar",
       name: "Edison Nunes (SuperADM)",
       role: "SuperADM",
+      firstAccess: true,
       createdAt: new Date().toISOString()
     });
 

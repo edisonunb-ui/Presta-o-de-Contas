@@ -597,7 +597,7 @@ export default function App() {
                       </label>
                       <input
                         type="email"
-                        placeholder="admin@portal.local"
+                        placeholder="edisonunb@gmail.com"
                         value={loginEmail}
                         onChange={(e) => setLoginEmail(e.target.value)}
                         className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-[#123E33] focus:ring-1 focus:ring-[#123E33] outline-none transition-all text-sm bg-white"
@@ -654,14 +654,14 @@ export default function App() {
                 <div className="grid grid-cols-1 gap-2 text-xs">
                   <div
                     onClick={() => {
-                      setLoginEmail("admin@portal.local");
-                      setLoginPassword("admin123");
+                      setLoginEmail("edisonunb@gmail.com");
+                      setLoginPassword("123mudar");
                     }}
                     className="p-3 border border-[#123E33]/20 hover:border-[#123E33] bg-[#FAF9F6] hover:bg-white cursor-pointer transition-colors flex items-center justify-between rounded-lg"
                   >
                     <div>
                       <div className="font-bold text-[#123E33]">SuperADM (Edison)</div>
-                      <div className="text-[10px] opacity-60 font-mono">admin@portal.local / admin123</div>
+                      <div className="text-[10px] opacity-60 font-mono">edisonunb@gmail.com / 123mudar</div>
                     </div>
                     <span className="text-[10px] uppercase font-bold tracking-widest opacity-60">Selecionar</span>
                   </div>
