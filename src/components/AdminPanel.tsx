@@ -112,6 +112,7 @@ export default function AdminPanel({
         administradoraId: finalAdmId || "",
         condominiumIds: userRole === "Sindico" ? userSelectedCondos : [],
         createdAt: new Date().toISOString(),
+        firstAccess: true,
       });
       await updateDoc(doc(db, "usuarios", docRef.id), { id: docRef.id });
 

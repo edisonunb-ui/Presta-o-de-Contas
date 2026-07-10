@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { collection, onSnapshot, addDoc } from "firebase/firestore";
+import { collection, onSnapshot, addDoc, doc, updateDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import { seedDatabaseIfEmpty } from "./utils/seed";
 import { User, Administradora, Condominium, Folder, FileEntry, Protocol, Message, AuditLog } from "./types";
@@ -34,6 +34,23 @@ export default function App() {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
 
+  // Registration states
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [regName, setRegName] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+  const [regPassword, setRegPassword] = useState("");
+  const [regRole, setRegRole] = useState<'Administrador' | 'Sindico'>("Sindico");
+  const [regAdmId, setRegAdmId] = useState("");
+  const [regCondoId, setRegCondoId] = useState("");
+  const [regSuccess, setRegSuccess] = useState("");
+  const [regError, setRegError] = useState("");
+
+  // Password change states (first access)
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [passwordChangeError, setPasswordChangeError] = useState("");
+  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState("");
+
   // DB States
   const [usuarios, setUsuarios] = useState<User[]>([]);
   const [administradoras, setAdministradoras] = useState<Administradora[]>([]);
@@ -51,6 +68,131 @@ export default function App() {
   // UI state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSeeding, setIsSeeding] = useState(true);
+
+  // Registration handler
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegError("");
+    setRegSuccess("");
+
+    if (!regEmail.trim() || !regPassword.trim() || !regName.trim() || !regRole) {
+      setRegError("Preencha todos os campos obrigatórios.");
+      return;
+    }
+
+    const emailExists = usuarios.some(
+      (u) => u.email.toLowerCase() === regEmail.trim().toLowerCase()
+    );
+    if (emailExists) {
+      setRegError("Este e-mail já está cadastrado no portal.");
+      return;
+    }
+
+    try {
+      const docRef = await addDoc(collection(db, "usuarios"), {
+        email: regEmail.trim().toLowerCase(),
+        password: regPassword.trim(),
+        name: regName.trim(),
+        role: regRole,
+        administradoraId: regAdmId || "",
+        condominiumIds: regRole === "Sindico" && regCondoId ? [regCondoId] : [],
+        createdAt: new Date().toISOString(),
+        firstAccess: true, // Force password change on first login
+      });
+      await updateDoc(doc(db, "usuarios", docRef.id), { id: docRef.id });
+
+      // Log autocadastro audit event
+      await addDoc(collection(db, "auditoria"), {
+        userId: docRef.id,
+        userName: regName.trim(),
+        userRole: regRole,
+        action: "Autocadastro",
+        details: `Usuário se autocadastrou no portal com e-mail: ${regEmail.trim().toLowerCase()}`,
+        createdAt: new Date().toISOString(),
+      });
+
+      setRegSuccess("Cadastro realizado com sucesso! Use seus dados para entrar.");
+      setLoginEmail(regEmail.trim().toLowerCase());
+      
+      // Clear registration form
+      setRegName("");
+      setRegEmail("");
+      setRegPassword("");
+      setRegRole("Sindico");
+      setRegAdmId("");
+      setRegCondoId("");
+      
+      setTimeout(() => {
+        setIsRegistering(false);
+        setRegSuccess("");
+      }, 2500);
+
+    } catch (err) {
+      console.error("Registration error:", err);
+      setRegError("Erro ao registrar no banco de dados. Tente novamente.");
+    }
+  };
+
+  // Change password handler (first access)
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordChangeError("");
+
+    if (!newPassword.trim()) {
+      setPasswordChangeError("A senha não pode ser vazia.");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setPasswordChangeError("A senha deve conter pelo menos 6 caracteres.");
+      return;
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      setPasswordChangeError("As senhas não coincidem.");
+      return;
+    }
+
+    if (!currentUser) return;
+
+    try {
+      await updateDoc(doc(db, "usuarios", currentUser.id), {
+        password: newPassword.trim(),
+        firstAccess: false,
+      });
+
+      // Audit Log
+      await addDoc(collection(db, "auditoria"), {
+        userId: currentUser.id,
+        userName: currentUser.name,
+        userRole: currentUser.role,
+        action: "Alteração de Senha",
+        details: "Alterou a senha provisória com sucesso no primeiro acesso",
+        createdAt: new Date().toISOString(),
+      });
+
+      // Update state and localStorage
+      const updatedUser: User = { 
+        ...currentUser, 
+        password: newPassword.trim(), 
+        firstAccess: false 
+      };
+      setCurrentUser(updatedUser);
+      localStorage.setItem("portal_user", JSON.stringify(updatedUser));
+
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setPasswordChangeSuccess("Sua senha foi alterada com sucesso!");
+
+      setTimeout(() => {
+        setPasswordChangeSuccess("");
+      }, 3000);
+
+    } catch (err) {
+      console.error("Password change error:", err);
+      setPasswordChangeError("Erro ao atualizar a senha no servidor. Tente novamente.");
+    }
+  };
 
   // 1. Seed database and subscribe to collections on mount
   useEffect(() => {
@@ -246,104 +388,267 @@ export default function App() {
 
   if (isSeeding) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#FDFCFB] border-8 border-[#111111]">
+      <div className="min-h-screen flex items-center justify-center bg-[#FAF9F6] border-8 border-[#123E33]">
         <div className="text-center space-y-4">
-          <div className="w-10 h-10 border-2 border-[#111111] border-t-transparent animate-spin mx-auto"></div>
-          <p className="text-xs uppercase tracking-[0.2em] font-bold text-[#111111]">Carregando nunesinformatica.online...</p>
+          <div className="w-10 h-10 border-2 border-[#123E33] border-t-transparent animate-spin mx-auto"></div>
+          <p className="text-xs uppercase tracking-[0.2em] font-bold text-[#123E33]">Carregando nunesinformatica.online...</p>
         </div>
       </div>
     );
   }
 
-  // --- LOGIN VIEW ---
+  // --- LOGIN & REGISTER VIEW ---
   if (!currentUser) {
     return (
-      <div id="loginView" className="min-h-screen flex flex-col border-8 border-[#111111] bg-[#FDFCFB] text-[#111111] font-sans">
+      <div id="loginView" className="min-h-screen flex flex-col border-8 border-[#123E33] bg-[#FAF9F6] text-[#123E33] font-sans">
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12">
           {/* Left Branding Side */}
-          <div className="lg:col-span-7 bg-[#F4F2EE] p-8 md:p-16 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-[#111111]">
-            <div className="flex items-center gap-2">
-              <span className="font-serif italic font-bold text-xl tracking-tight text-[#111111]">
+          <div 
+            className="lg:col-span-7 p-8 md:p-16 flex flex-col justify-between border-b lg:border-b-0 lg:border-r border-[#123E33] bg-cover bg-center text-white relative min-h-[400px] lg:min-h-0"
+            style={{ 
+              backgroundImage: "linear-gradient(180deg, rgba(18, 62, 51, 0.75) 0%, rgba(12, 40, 33, 0.95) 100%), url('https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1600&q=80')" 
+            }}
+          >
+            <div className="flex items-center gap-2 relative z-10">
+              <span className="font-serif italic font-bold text-xl tracking-tight text-white/90">
                 nunesinformatica.online
               </span>
             </div>
 
-            <div className="my-16 space-y-6 max-w-xl">
-              <p className="text-[10px] uppercase tracking-[0.2em] font-bold opacity-60">
-                Portal de Prestação de Contas
+            <div className="my-12 lg:my-16 space-y-6 max-w-xl relative z-10">
+              <p className="text-[10px] uppercase tracking-[0.25em] font-extrabold text-[#C2A87E]">
+                Portal de Condomínios
               </p>
-              <h1 className="text-4xl md:text-6xl font-serif italic font-light tracking-tight leading-tight text-[#111111]">
-                Nunes <br className="hidden md:inline" /> Informática
+              <h1 className="text-4xl md:text-6xl font-serif italic tracking-tight leading-tight text-white font-light">
+                Pastas de prestação <br /> de contas com <br /> acesso controlado.
               </h1>
-              <p className="text-[#111111] opacity-80 text-sm md:text-base leading-relaxed font-serif italic">
-                Pastas de prestação de contas com acesso controlado e segurança irrestrita para conselhos e sindicatos.
-              </p>
-              <div className="w-16 h-[2px] bg-[#111111]"></div>
-              <p className="text-xs text-[#111111] opacity-70 leading-relaxed">
-                Cada administradora gerencia seus condomínios de forma isolada. Síndicos acessam e
-                baixam pastas em PDF com total segurança, sem permissão de alteração.
+              <div className="w-16 h-[2px] bg-[#C2A87E]/60"></div>
+              <p className="text-sm text-white/90 font-light leading-relaxed">
+                Cada administrador vê apenas os condomínios permitidos. Síndicos podem ficar somente com leitura e download, sem mexer nos arquivos.
               </p>
             </div>
 
-            <div className="text-[10px] uppercase font-bold tracking-widest text-[#111111]/60 flex items-center gap-2 pt-6 border-t border-[#111111]/10">
-              <span className="w-2 h-2 rounded-full bg-green-600 animate-pulse"></span>
+            <div className="text-[10px] uppercase font-bold tracking-widest text-white/70 flex items-center gap-2 pt-6 border-t border-white/10 relative z-10">
+              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
               <span>Auditoria Completa & Controle de Privilégios</span>
             </div>
           </div>
 
           {/* Right Form Side */}
-          <div className="lg:col-span-5 flex items-center justify-center p-6 md:p-12 bg-[#FDFCFB]">
-            <div className="w-full max-w-md p-8 md:p-10 border border-[#111111] bg-white space-y-6 shadow-none">
-              <div className="space-y-2 pb-4 border-b border-[#111111]/10">
-                <p className="text-[9px] uppercase tracking-widest opacity-50">Portal Autorizado</p>
-                <h2 className="text-2xl font-serif italic text-[#111111]">Acessar Portal</h2>
-              </div>
-
-              <form onSubmit={handleLogin} className="space-y-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-[#111111] uppercase tracking-widest mb-2">
-                    ID de Usuário (E-mail)
-                  </label>
-                  <input
-                    type="email"
-                    placeholder="seuemail@exemplo.com"
-                    value={loginEmail}
-                    onChange={(e) => setLoginEmail(e.target.value)}
-                    className="w-full px-4 py-3 rounded-none border border-[#111111] focus:bg-[#F4F2EE] outline-none transition-all text-sm bg-white"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-[#111111] uppercase tracking-widest mb-2">
-                    Senha de Acesso
-                  </label>
-                  <input
-                    type="password"
-                    placeholder="••••••••"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    className="w-full px-4 py-3 rounded-none border border-[#111111] focus:bg-[#F4F2EE] outline-none transition-all text-sm bg-white"
-                    required
-                  />
-                </div>
-
-                {loginError && (
-                  <div className="p-3 text-xs font-serif italic text-red-700 bg-red-50 border border-red-200">
-                    {loginError}
+          <div className="lg:col-span-5 flex items-center justify-center p-6 md:p-12 bg-[#FAF9F6]">
+            <div className="w-full max-w-md p-8 md:p-10 bg-white rounded-2xl shadow-xl space-y-6 border border-gray-100">
+              
+              {isRegistering ? (
+                <div className="space-y-6">
+                  <div className="space-y-2 pb-4 border-b border-[#123E33]/10">
+                    <p className="text-[10px] uppercase tracking-widest text-[#123E33] font-bold">Crie seu Acesso</p>
+                    <h2 className="text-2xl font-serif italic text-[#123E33]">Cadastrar Conta</h2>
                   </div>
-                )}
 
-                <button
-                  type="submit"
-                  className="w-full bg-[#111111] hover:bg-[#C2A87E] text-white font-bold py-3 text-[11px] uppercase tracking-widest transition-colors cursor-pointer rounded-none border-2 border-[#111111]"
-                >
-                  Entrar no Portal
-                </button>
-              </form>
+                  <form onSubmit={handleRegister} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                        Nome Completo
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ex: João Silva"
+                        value={regName}
+                        onChange={(e) => setRegName(e.target.value)}
+                        className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:border-[#123E33] focus:ring-1 focus:ring-[#123E33] outline-none transition-all text-sm bg-white"
+                        required
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                          E-mail (ID)
+                        </label>
+                        <input
+                          type="email"
+                          placeholder="seu@email.com"
+                          value={regEmail}
+                          onChange={(e) => setRegEmail(e.target.value)}
+                          className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:border-[#123E33] focus:ring-1 focus:ring-[#123E33] outline-none transition-all text-sm bg-white"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                          Senha Inicial
+                        </label>
+                        <input
+                          type="password"
+                          placeholder="Min. 6 caracteres"
+                          value={regPassword}
+                          onChange={(e) => setRegPassword(e.target.value)}
+                          className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:border-[#123E33] focus:ring-1 focus:ring-[#123E33] outline-none transition-all text-sm bg-white"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                        Tipo de Permissão
+                      </label>
+                      <select
+                        value={regRole}
+                        onChange={(e) => setRegRole(e.target.value as "Administrador" | "Sindico")}
+                        className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:border-[#123E33] focus:ring-1 focus:ring-[#123E33] outline-none transition-all text-sm bg-white"
+                        required
+                      >
+                        <option value="Sindico">Síndico (Apenas Visualização)</option>
+                        <option value="Administrador">Administrador (Gestor)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                        Vincular à Administradora
+                      </label>
+                      <select
+                        value={regAdmId}
+                        onChange={(e) => {
+                          setRegAdmId(e.target.value);
+                          setRegCondoId("");
+                        }}
+                        className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:border-[#123E33] focus:ring-1 focus:ring-[#123E33] outline-none transition-all text-sm bg-white"
+                        required
+                      >
+                        <option value="">Selecione...</option>
+                        {administradoras.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {regRole === "Sindico" && regAdmId && (
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+                          Selecione seu Condomínio
+                        </label>
+                        <select
+                          value={regCondoId}
+                          onChange={(e) => setRegCondoId(e.target.value)}
+                          className="w-full px-4 py-2.5 rounded-lg border border-gray-300 focus:border-[#123E33] focus:ring-1 focus:ring-[#123E33] outline-none transition-all text-sm bg-white"
+                          required
+                        >
+                          <option value="">Selecione...</option>
+                          {condominios
+                            .filter((c) => c.administradoraId === regAdmId)
+                            .map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    )}
+
+                    {regError && (
+                      <div className="p-3 text-xs font-serif italic text-red-700 bg-red-50 border border-red-200 rounded-lg">
+                        {regError}
+                      </div>
+                    )}
+
+                    {regSuccess && (
+                      <div className="p-3 text-xs font-serif italic text-green-700 bg-green-50 border border-green-200 rounded-lg animate-pulse">
+                        {regSuccess}
+                      </div>
+                    )}
+
+                    <div className="pt-2">
+                      <button
+                        type="submit"
+                        className="w-full bg-[#123E33] hover:bg-[#0d2a23] text-white font-bold py-3 text-xs uppercase tracking-widest transition-colors cursor-pointer rounded-lg border-none"
+                      >
+                        Cadastrar no Portal
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="text-center pt-2">
+                    <button
+                      onClick={() => {
+                        setIsRegistering(false);
+                        setRegError("");
+                        setRegSuccess("");
+                      }}
+                      className="text-xs text-[#123E33] font-bold underline hover:text-[#C2A87E] transition-colors cursor-pointer"
+                    >
+                      Já tem acesso? Faça Login
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-1.5 pb-2">
+                    <h2 className="text-3xl font-bold tracking-tight text-gray-900">Entrar</h2>
+                  </div>
+
+                  <form onSubmit={handleLogin} className="space-y-5">
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                        E-mail
+                      </label>
+                      <input
+                        type="email"
+                        placeholder="admin@portal.local"
+                        value={loginEmail}
+                        onChange={(e) => setLoginEmail(e.target.value)}
+                        className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-[#123E33] focus:ring-1 focus:ring-[#123E33] outline-none transition-all text-sm bg-white"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                        Senha
+                      </label>
+                      <input
+                        type="password"
+                        placeholder="••••••••"
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:border-[#123E33] focus:ring-1 focus:ring-[#123E33] outline-none transition-all text-sm bg-white"
+                        required
+                      />
+                    </div>
+
+                    {loginError && (
+                      <div className="p-3 text-xs font-serif italic text-red-700 bg-red-50 border border-red-200 rounded-lg">
+                        {loginError}
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      className="w-full bg-[#123E33] hover:bg-[#0d2a23] text-white font-bold py-3 text-sm tracking-wide transition-all cursor-pointer rounded-lg border-none"
+                    >
+                      Acessar portal
+                    </button>
+                  </form>
+
+                  <div className="text-center pt-3 border-t border-gray-100">
+                    <button
+                      onClick={() => {
+                        setIsRegistering(true);
+                        setLoginError("");
+                      }}
+                      className="text-xs text-[#123E33] font-bold underline hover:text-[#C2A87E] transition-colors cursor-pointer"
+                    >
+                      Não tem uma conta? Cadastre-se aqui
+                    </button>
+                  </div>
+                </>
+              )}
 
               <div className="pt-6 space-y-3">
-                <span className="text-[9px] font-bold text-[#111111]/40 uppercase tracking-widest block">
+                <span className="text-[9px] font-bold text-[#123E33]/40 uppercase tracking-widest block">
                   Acesso Rápido para Demonstração:
                 </span>
                 <div className="grid grid-cols-1 gap-2 text-xs">
@@ -352,10 +657,10 @@ export default function App() {
                       setLoginEmail("admin@portal.local");
                       setLoginPassword("admin123");
                     }}
-                    className="p-3 border border-[#111111]/20 hover:border-[#111111] bg-[#FDFCFB] hover:bg-white cursor-pointer transition-colors flex items-center justify-between"
+                    className="p-3 border border-[#123E33]/20 hover:border-[#123E33] bg-[#FAF9F6] hover:bg-white cursor-pointer transition-colors flex items-center justify-between rounded-lg"
                   >
                     <div>
-                      <div className="font-bold text-[#111111]">SuperADM (Edison)</div>
+                      <div className="font-bold text-[#123E33]">SuperADM (Edison)</div>
                       <div className="text-[10px] opacity-60 font-mono">admin@portal.local / admin123</div>
                     </div>
                     <span className="text-[10px] uppercase font-bold tracking-widest opacity-60">Selecionar</span>
@@ -366,10 +671,10 @@ export default function App() {
                       setLoginEmail("adm.alpha@portal.local");
                       setLoginPassword("adm123");
                     }}
-                    className="p-3 border border-[#111111]/20 hover:border-[#111111] bg-[#FDFCFB] hover:bg-white cursor-pointer transition-colors flex items-center justify-between"
+                    className="p-3 border border-[#123E33]/20 hover:border-[#123E33] bg-[#FAF9F6] hover:bg-white cursor-pointer transition-colors flex items-center justify-between rounded-lg"
                   >
                     <div>
-                      <div className="font-bold text-[#111111]">Administrador Alpha</div>
+                      <div className="font-bold text-[#123E33]">Administrador Alpha</div>
                       <div className="text-[10px] opacity-60 font-mono">adm.alpha@portal.local / adm123</div>
                     </div>
                     <span className="text-[10px] uppercase font-bold tracking-widest opacity-60">Selecionar</span>
@@ -380,10 +685,10 @@ export default function App() {
                       setLoginEmail("sindico.alpha@portal.local");
                       setLoginPassword("sindico123");
                     }}
-                    className="p-3 border border-[#111111]/20 hover:border-[#111111] bg-[#FDFCFB] hover:bg-white cursor-pointer transition-colors flex items-center justify-between"
+                    className="p-3 border border-[#123E33]/20 hover:border-[#123E33] bg-[#FAF9F6] hover:bg-white cursor-pointer transition-colors flex items-center justify-between rounded-lg"
                   >
                     <div>
-                      <div className="font-bold text-[#111111]">Síndico (Carlos)</div>
+                      <div className="font-bold text-[#123E33]">Síndico (Carlos)</div>
                       <div className="text-[10px] opacity-60 font-mono">sindico.alpha@portal.local / sindico123</div>
                     </div>
                     <span className="text-[10px] uppercase font-bold tracking-widest opacity-60">Selecionar</span>
@@ -397,12 +702,85 @@ export default function App() {
     );
   }
 
+  // --- PASSWORD CHANGE FORCE SCREEN (FIRST ACCESS) ---
+  if (currentUser && currentUser.firstAccess === true) {
+    return (
+      <div id="passwordForceView" className="min-h-screen flex items-center justify-center border-8 border-[#123E33] bg-[#FAF9F6] text-[#123E33] font-sans p-6">
+        <div className="w-full max-w-md p-8 md:p-10 border border-[#123E33] bg-white space-y-6 shadow-none">
+          <div className="space-y-2 pb-4 border-b border-[#123E33]/10 text-center">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#C2A87E] inline-block animate-pulse mb-1"></span>
+            <p className="text-[10px] uppercase tracking-widest opacity-60">Segurança de Acesso</p>
+            <h2 className="text-3xl font-serif italic text-[#123E33]">Primeiro Acesso</h2>
+            <p className="text-xs text-gray-500 font-serif italic mt-1">Por favor, altere sua senha provisória por questões de segurança.</p>
+          </div>
+
+          <form onSubmit={handleChangePassword} className="space-y-5">
+            <div>
+              <label className="block text-[10px] font-bold text-[#123E33] uppercase tracking-widest mb-2">
+                Nova Senha de Acesso
+              </label>
+              <input
+                type="password"
+                placeholder="Mínimo 6 caracteres"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="w-full px-4 py-3 rounded-none border border-[#123E33] focus:bg-[#EEF2F0] outline-none transition-all text-sm bg-white"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-[#123E33] uppercase tracking-widest mb-2">
+                Confirme a Nova Senha
+              </label>
+              <input
+                type="password"
+                placeholder="Confirme sua nova senha"
+                value={confirmNewPassword}
+                onChange={(e) => setConfirmNewPassword(e.target.value)}
+                className="w-full px-4 py-3 rounded-none border border-[#123E33] focus:bg-[#EEF2F0] outline-none transition-all text-sm bg-white"
+                required
+              />
+            </div>
+
+            {passwordChangeError && (
+              <div className="p-3 text-xs font-serif italic text-red-700 bg-red-50 border border-red-200">
+                {passwordChangeError}
+              </div>
+            )}
+
+            {passwordChangeSuccess && (
+              <div className="p-3 text-xs font-serif italic text-green-700 bg-green-50 border border-green-200 animate-pulse">
+                {passwordChangeSuccess}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className="w-full bg-[#123E33] hover:bg-[#C2A87E] text-white font-bold py-3 text-xs uppercase tracking-widest transition-colors cursor-pointer rounded-none border border-[#123E33]"
+            >
+              Salvar Nova Senha
+            </button>
+            
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="w-full bg-white hover:bg-gray-50 text-gray-500 font-bold py-2.5 text-[10px] uppercase tracking-widest transition-colors cursor-pointer rounded-none border border-gray-300"
+            >
+              Voltar ao Login
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   // --- MAIN APP PORTAL VIEW ---
   return (
-    <div id="appView" className="min-h-screen flex flex-col md:flex-row bg-[#FDFCFB] text-[#111111] font-sans border-8 border-[#111111] overflow-hidden">
+    <div id="appView" className="min-h-screen flex flex-col md:flex-row bg-[#FAF9F6] text-[#123E33] font-sans border-8 border-[#123E33] overflow-hidden">
       
       {/* MOBILE HEADER */}
-      <header className="md:hidden flex items-center justify-between bg-[#111111] text-white px-5 py-4 border-b border-[#111111]">
+      <header className="md:hidden flex items-center justify-between bg-[#123E33] text-white px-5 py-4 border-b border-[#123E33]">
         <div className="flex items-center gap-2">
           <span className="font-serif italic font-bold tracking-wider text-base text-white">
             nunesinformatica.online
@@ -419,25 +797,25 @@ export default function App() {
       {/* SIDEBAR CONTAINER */}
       <aside
         id="sidebarRoot"
-        className={`fixed md:sticky top-0 left-0 bottom-0 z-40 w-72 bg-[#F4F2EE] text-[#111111] p-6 flex flex-col justify-between border-r border-[#111111] transition-transform duration-300 md:translate-x-0 ${
+        className={`fixed md:sticky top-0 left-0 bottom-0 z-40 w-72 bg-[#EEF2F0] text-[#123E33] p-6 flex flex-col justify-between border-r border-[#123E33] transition-transform duration-300 md:translate-x-0 ${
           isSidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <div className="space-y-6 flex-1 flex flex-col min-h-0">
           {/* Logo */}
-          <div className="space-y-1 pb-6 border-b border-[#111111]">
+          <div className="space-y-1 pb-6 border-b border-[#123E33]">
             <p className="text-[10px] uppercase tracking-[0.2em] font-bold opacity-60">Sistema de Gestão</p>
             <h1 className="font-serif italic text-2xl leading-none">Nunes <br/>Informática</h1>
           </div>
 
           {/* User Info Card */}
-          <div className="space-y-2 py-4 border-b border-[#111111]/20">
+          <div className="space-y-2 py-4 border-b border-[#123E33]/20">
             <p className="text-[9px] uppercase tracking-widest opacity-50">Acesso Autorizado</p>
             <div className="flex items-center gap-2">
               <div className="w-2.5 h-2.5 rounded-full bg-green-600"></div>
-              <h4 id="userName" className="font-bold text-[#111111] text-sm truncate">{currentUser.name}</h4>
+              <h4 id="userName" className="font-bold text-[#123E33] text-sm truncate">{currentUser.name}</h4>
             </div>
-            <p className="text-[11px] font-serif italic text-[#111111]/80">Nível: {currentUser.role}</p>
+            <p className="text-[11px] font-serif italic text-[#123E33]/80">Nível: {currentUser.role}</p>
             <p className="text-[10px] text-gray-500 uppercase tracking-tighter truncate max-w-[200px]" title={currentUserAdmName}>
               {currentUserAdmName}
             </p>
@@ -447,7 +825,7 @@ export default function App() {
           <div className="space-y-2 flex-1 flex flex-col min-h-0 pt-4">
             <p className="text-[9px] uppercase tracking-widest opacity-50 mb-1 flex items-center justify-between">
               <span>Nossos Condomínios</span>
-              <span className="bg-[#111111] text-white px-2 py-0.5 text-[9px] uppercase font-bold">
+              <span className="bg-[#123E33] text-white px-2 py-0.5 text-[9px] uppercase font-bold">
                 {visibleCondos.length}
               </span>
             </p>
@@ -464,10 +842,10 @@ export default function App() {
                         setSelectedCondominiumId(condo.id);
                         setIsSidebarOpen(false); // close mobile sidebar on select
                       }}
-                      className={`w-full text-left p-3 text-xs font-bold transition-all flex items-center justify-between cursor-pointer border-b border-[#111111]/10 ${
+                      className={`w-full text-left p-3 text-xs font-bold transition-all flex items-center justify-between cursor-pointer border-b border-[#123E33]/10 ${
                         isSelected
-                          ? "bg-[#111111] text-white"
-                          : "text-[#111111] hover:bg-[#E5E5E5]/60 hover:text-[#111111]"
+                          ? "bg-[#123E33] text-white"
+                          : "text-[#123E33] hover:bg-[#C2A87E]/20 hover:text-[#123E33]"
                       }`}
                     >
                       <span className="truncate">{condo.name}</span>
@@ -481,11 +859,11 @@ export default function App() {
         </div>
 
         {/* Logout and bottom section */}
-        <div className="pt-4 border-t border-[#111111] mt-6">
+        <div className="pt-4 border-t border-[#123E33] mt-6">
           <button
             id="logoutButton"
             onClick={handleLogout}
-            className="w-full flex items-center gap-2 justify-center py-2.5 border border-[#111111] bg-white hover:bg-red-50 text-[#111111] hover:text-red-700 text-xs font-bold uppercase tracking-widest transition-all cursor-pointer rounded-none"
+            className="w-full flex items-center gap-2 justify-center py-2.5 border border-[#123E33] bg-white hover:bg-red-50 text-[#123E33] hover:text-red-700 text-xs font-bold uppercase tracking-widest transition-all cursor-pointer rounded-none"
           >
             <LogOut className="w-3.5 h-3.5" /> Sair da Conta
           </button>
@@ -508,10 +886,10 @@ export default function App() {
       <main id="workspaceArea" className="flex-1 flex flex-col h-full min-w-0 overflow-y-auto">
         
         {/* Dynamic header depending on condominium selection */}
-        <header className="border-b border-[#111111] p-8 md:p-10 flex flex-col sm:flex-row sm:items-baseline justify-between gap-4 bg-white">
+        <header className="border-b border-[#123E33] p-8 md:p-10 flex flex-col sm:flex-row sm:items-baseline justify-between gap-4 bg-white">
           <div className="space-y-1">
             <p className="text-[11px] uppercase tracking-[0.3em] font-bold">Unidade de Controle</p>
-            <h1 id="condominiumTitle" className="text-3xl md:text-5xl font-serif italic tracking-tight text-[#111111]">
+            <h1 id="condominiumTitle" className="text-3xl md:text-5xl font-serif italic tracking-tight text-[#123E33]">
               {selectedCondoName}
             </h1>
           </div>
@@ -522,14 +900,14 @@ export default function App() {
         </header>
 
         {selectedCondominiumId && (
-          <div className="bg-[#F4F2EE] border-b border-[#111111] px-6 py-3 flex flex-wrap gap-2">
+          <div className="bg-[#EEF2F0] border-b border-[#123E33] px-6 py-3 flex flex-wrap gap-2">
             <button
               id="foldersTab"
               onClick={() => setActiveTab("folders")}
               className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
                 activeTab === "folders"
-                  ? "bg-[#111111] text-white border-[#111111]"
-                  : "bg-white text-[#111111] border-[#111111]/20 hover:border-[#111111]"
+                  ? "bg-[#123E33] text-white border-[#123E33]"
+                  : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
               }`}
             >
               <FolderKanban className="w-4 h-4" /> Pastas
@@ -539,8 +917,8 @@ export default function App() {
               onClick={() => setActiveTab("protocols")}
               className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
                 activeTab === "protocols"
-                  ? "bg-[#111111] text-white border-[#111111]"
-                  : "bg-white text-[#111111] border-[#111111]/20 hover:border-[#111111]"
+                  ? "bg-[#123E33] text-white border-[#123E33]"
+                  : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
               }`}
             >
               <HelpCircle className="w-4 h-4" /> Protocolos
@@ -551,8 +929,8 @@ export default function App() {
                 onClick={() => setActiveTab("admin")}
                 className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
                   activeTab === "admin"
-                    ? "bg-[#111111] text-white border-[#111111]"
-                    : "bg-white text-[#111111] border-[#111111]/20 hover:border-[#111111]"
+                    ? "bg-[#123E33] text-white border-[#123E33]"
+                    : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
                 }`}
               >
                 <Users className="w-4 h-4" /> Controle de Acesso
@@ -563,8 +941,8 @@ export default function App() {
               onClick={() => setActiveTab("audit")}
               className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
                 activeTab === "audit"
-                  ? "bg-[#111111] text-white border-[#111111]"
-                  : "bg-white text-[#111111] border-[#111111]/20 hover:border-[#111111]"
+                  ? "bg-[#123E33] text-white border-[#123E33]"
+                  : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
               }`}
             >
               <ShieldCheck className="w-4 h-4" /> Auditoria
@@ -573,7 +951,7 @@ export default function App() {
         )}
 
         {/* WORKSPACE VIEWS */}
-        <div className="flex-1 p-6 md:p-8 bg-[#FDFCFB]">
+        <div className="flex-1 p-6 md:p-8 bg-[#FAF9F6]">
           {selectedCondominiumId ? (
             <div className="h-full">
               {/* TABS VIEW RENDER */}
@@ -622,17 +1000,17 @@ export default function App() {
             </div>
           ) : (
             /* NO CONDOMINIUM SELECTED VIEW */
-            <div className="bg-white border border-[#111111] p-12 text-center flex flex-col items-center justify-center min-h-[450px]">
-              <div className="p-4 bg-[#F4F2EE] text-[#111111] border border-[#111111] mb-6">
+            <div className="bg-white border border-[#123E33] p-12 text-center flex flex-col items-center justify-center min-h-[450px]">
+              <div className="p-4 bg-[#EEF2F0] text-[#123E33] border border-[#123E33] mb-6">
                 <Building className="w-12 h-12" />
               </div>
-              <h3 className="text-2xl font-serif italic text-[#111111]">Bem-vindo, {currentUser.name}!</h3>
-              <p className="text-xs text-[#111111] opacity-70 max-w-sm mt-3 leading-relaxed">
+              <h3 className="text-2xl font-serif italic text-[#123E33]">Bem-vindo, {currentUser.name}!</h3>
+              <p className="text-xs text-[#123E33] opacity-70 max-w-sm mt-3 leading-relaxed">
                 Selecione um condomínio na barra lateral para acessar as pastas mensais de prestação de contas, fazer downloads de relatórios ou abrir chamados/demandas técnicas.
               </p>
 
               {(currentUser.role === "SuperADM" || currentUser.role === "Administrador") && (
-                <div className="mt-8 pt-6 border-t border-[#111111]/20 w-full max-w-sm">
+                <div className="mt-8 pt-6 border-t border-[#123E33]/20 w-full max-w-sm">
                   <p className="text-[10px] uppercase font-bold tracking-widest opacity-60 mb-3">Acesso Administrativo:</p>
                   <button
                     onClick={() => {
@@ -643,7 +1021,7 @@ export default function App() {
                         alert("Por favor, crie uma administradora ou condomínio primeiro!");
                       }
                     }}
-                    className="border-2 border-[#111111] text-[#111111] hover:bg-[#111111] hover:text-white text-[11px] uppercase font-bold tracking-widest px-6 py-2.5 transition-all cursor-pointer inline-flex items-center gap-2"
+                    className="border-2 border-[#123E33] text-[#123E33] hover:bg-[#123E33] hover:text-white text-[11px] uppercase font-bold tracking-widest px-6 py-2.5 transition-all cursor-pointer inline-flex items-center gap-2"
                   >
                     <PlusCircle className="w-4 h-4" /> Acessar Configurações
                   </button>

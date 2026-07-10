@@ -8,8 +8,8 @@
 
 body {
   font-family: var(--font-sans);
-  background-color: #FDFCFB;
-  color: #111111;
+  background-color: #FAF9F6;
+  color: #123E33;
 }
 
 h1, h2, h3, h4 {
@@ -25,7 +25,7 @@ h1, h2, h3, h4 {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #111111;
+  background: #123E33;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #C2A87E;

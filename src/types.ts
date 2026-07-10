@@ -20,6 +20,7 @@ export interface User {
   administradoraId?: string; // link to Administradora (for Administrador and Sindico)
   condominiumIds?: string[]; // link to Condominium IDs (especially for Sindico)
   createdAt: string;
+  firstAccess?: boolean; // force password change on first login
 }
 
 export interface Folder {
