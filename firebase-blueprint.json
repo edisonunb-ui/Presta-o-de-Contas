@@ -1,0 +1,154 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account containing credentials and access roles",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "password": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["SuperADM", "Administrador", "Sindico"] },
+        "administradoraId": { "type": "string" },
+        "condominiumIds": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "email", "password", "name", "role", "createdAt"]
+    },
+    "Administradora": {
+      "title": "Administradora",
+      "description": "A property management company that manages condominiums",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "createdAt"]
+    },
+    "Condominium": {
+      "title": "Condominium",
+      "description": "A residential or commercial condominium complex",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "administradoraId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "administradoraId", "createdAt"]
+    },
+    "Folder": {
+      "title": "Folder",
+      "description": "A monthly accountability folder containing PDF files",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "condominiumId": { "type": "string" },
+        "year": { "type": "number" },
+        "month": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "condominiumId", "year", "month", "createdAt"]
+    },
+    "File": {
+      "title": "File",
+      "description": "A PDF file representing monthly accounts of a condominium",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "folderId": { "type": "string" },
+        "name": { "type": "string" },
+        "size": { "type": "number" },
+        "type": { "type": "string" },
+        "uploadedBy": { "type": "string" },
+        "uploadedAt": { "type": "string", "format": "date-time" },
+        "content": { "type": "string" }
+      },
+      "required": ["id", "folderId", "name", "size", "type", "uploadedBy", "uploadedAt"]
+    },
+    "Protocol": {
+      "title": "Protocol",
+      "description": "A demand ticket or communication protocol",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "condominiumId": { "type": "string" },
+        "subject": { "type": "string" },
+        "description": { "type": "string" },
+        "direction": { "type": "string", "enum": ["administradora_para_sindico", "sindico_para_administradora"] },
+        "priority": { "type": "string", "enum": ["normal", "alta", "urgente"] },
+        "status": { "type": "string", "enum": ["aberto", "respondido", "encerrado"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "closedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "condominiumId", "subject", "description", "direction", "priority", "status", "createdAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A message or reply inside a protocol ticket",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "protocolId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string" },
+        "message": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "fileUrl": { "type": "string" },
+        "fileName": { "type": "string" }
+      },
+      "required": ["id", "protocolId", "senderName", "senderRole", "message", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "An administrative audit log for security tracking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "userName", "userRole", "action", "details", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User credentials, access roles, and permissions"
+    },
+    "/administradoras/{administradoraId}": {
+      "schema": "Administradora",
+      "description": "Property management company entries"
+    },
+    "/condominios/{condominioId}": {
+      "schema": "Condominium",
+      "description": "Condominium entries"
+    },
+    "/pastas/{pastaId}": {
+      "schema": "Folder",
+      "description": "Monthly accountability folders"
+    },
+    "/arquivos/{arquivoId}": {
+      "schema": "File",
+      "description": "Metadata and contents of PDFs uploaded into folders"
+    },
+    "/protocolos/{protocoloId}": {
+      "schema": "Protocol",
+      "description": "Support tickets/demands between administrators and trustees"
+    },
+    "/mensagens/{mensagemId}": {
+      "schema": "Message",
+      "description": "Discussion log messages inside a protocol"
+    },
+    "/auditoria/{logId}": {
+      "schema": "AuditLog",
+      "description": "Security audit tracking history"
+    }
+  }
+}
