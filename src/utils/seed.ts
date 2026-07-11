@@ -17,7 +17,7 @@ export async function seedDatabaseIfEmpty() {
         id: userSuperId,
         email: "edisonunb@gmail.com",
         password: "123456",
-        name: "Edison Nunes (SuperADM)",
+        name: "Edison Nunes (Gestor Condominial)",
         role: "SuperADM",
         firstAccess: false,
         createdAt: new Date().toISOString()
@@ -25,13 +25,18 @@ export async function seedDatabaseIfEmpty() {
       console.log("SuperADM edisonunb@gmail.com criado com sucesso com senha 123456!");
     } else {
       const currentData = edisonDoc.data();
+      const updates: any = {};
       // Se a senha for "123mudar" (senha antiga), atualizamos para "123456" conforme pedido do usuário
       if (currentData.password === "123mudar") {
-        await setDoc(doc(db, "usuarios", edisonDoc.id), {
-          password: "123456",
-          firstAccess: false
-        }, { merge: true });
-        console.log("SuperADM password atualizada de 123mudar para 123456.");
+        updates.password = "123456";
+        updates.firstAccess = false;
+      }
+      if (currentData.name === "Edison Nunes (SuperADM)" || !currentData.name) {
+        updates.name = "Edison Nunes (Gestor Condominial)";
+      }
+      if (Object.keys(updates).length > 0) {
+        await setDoc(doc(db, "usuarios", edisonDoc.id), updates, { merge: true });
+        console.log("Edison user updated in db with friendly name/password:", updates);
       }
     }
 
@@ -97,10 +102,10 @@ export async function seedDatabaseIfEmpty() {
     batch.set(superRef, {
       id: seedSuperId,
       email: "edisonunb@gmail.com",
-      password: "123mudar",
-      name: "Edison Nunes (SuperADM)",
+      password: "123456",
+      name: "Edison Nunes (Gestor Condominial)",
       role: "SuperADM",
-      firstAccess: true,
+      firstAccess: false,
       createdAt: new Date().toISOString()
     });
 

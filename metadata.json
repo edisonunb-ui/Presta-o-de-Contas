@@ -1,5 +1,5 @@
 {
-  "name": "Portal de Prestação de Contas",
+  "name": "Gestor Condominial",
   "description": "Portal para hospedagem e controle de acesso a pastas de prestação de contas de condomínios para administradoras, síndicos e administradores.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

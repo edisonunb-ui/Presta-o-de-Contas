@@ -4,6 +4,13 @@ import { db } from "../firebase";
 import { User, Administradora, Condominium, UserPermissions } from "../types";
 import { Building2, Shield, UserCog, Plus, Trash2, Key, Users, CheckSquare, Folder, FolderOpen, ChevronRight, ChevronDown, User as UserIcon, Database, Download, Upload, FileJson, RefreshCw } from "lucide-react";
 
+const getFriendlyRoleName = (role: string) => {
+  if (role === "SuperADM") return "Gestor Condominial";
+  if (role === "Administrador") return "Administradora";
+  if (role === "Sindico") return "Síndico";
+  return role;
+};
+
 interface AdminPanelProps {
   currentUser: User;
   administradoras: Administradora[];
@@ -1589,7 +1596,7 @@ export default function AdminPanel({
                               }`}
                             >
                               {u.role === "SuperADM"
-                                ? "Super ADM"
+                                ? "Gestor Condominial"
                                 : u.role === "Administrador"
                                 ? "Administradora"
                                 : "Síndico"}
@@ -1597,7 +1604,7 @@ export default function AdminPanel({
                           </td>
                           <td className="py-4 px-4 text-xs text-gray-600">
                             {u.role === "SuperADM" ? (
-                              <span className="text-gray-400 font-serif italic">Acesso Total (SuperADM)</span>
+                              <span className="text-gray-400 font-serif italic">Acesso Total (Gestor Condominial)</span>
                             ) : u.role === "Administrador" ? (
                               <span className="text-gray-400 font-serif italic">Todos da Administradora</span>
                             ) : linkedCondos.length === 0 ? (
@@ -1655,7 +1662,7 @@ export default function AdminPanel({
                         )}
                         <FolderOpen className="w-5 h-5 text-[#123E33] fill-current opacity-20" />
                         <span className="font-serif italic font-bold text-sm text-[#111111] flex items-center gap-2">
-                          👑 Super Administradores do Portal ({usuarios.filter(u => u.role === "SuperADM").length})
+                          👑 Gestores Condominais do Portal ({usuarios.filter(u => u.role === "SuperADM").length})
                         </span>
                       </div>
                       <span className="text-[9px] text-gray-500 font-mono">
@@ -2055,7 +2062,7 @@ export default function AdminPanel({
                   <option value="Sindico">Síndico (Apenas Visualização por padrão)</option>
                   <option value="Administrador">Administrador (Gestor por padrão)</option>
                   {editRole === "SuperADM" && (
-                    <option value="SuperADM">Super ADM (Acesso Total)</option>
+                    <option value="SuperADM">Gestor Condominial (Acesso Total)</option>
                   )}
                 </select>
               </div>

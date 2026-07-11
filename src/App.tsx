@@ -26,6 +26,13 @@ import {
   Home
 } from "lucide-react";
 
+export function getFriendlyRoleName(role: string) {
+  if (role === "SuperADM") return "Gestor Condominial";
+  if (role === "Administrador") return "Administradora";
+  if (role === "Sindico") return "Síndico";
+  return role;
+}
+
 export default function App() {
   // Authentication & session
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -709,7 +716,7 @@ export default function App() {
                                   ? "bg-blue-50 text-blue-700 border-blue-200"
                                   : "bg-[#123E33]/5 text-[#123E33] border-[#123E33]/20"
                             }`}>
-                              {matchedUser.role}
+                              {getFriendlyRoleName(matchedUser.role)}
                             </span>
                           </div>
                           
@@ -933,7 +940,7 @@ export default function App() {
               <div className="w-2.5 h-2.5 rounded-full bg-green-600"></div>
               <h4 id="userName" className="font-bold text-[#123E33] text-sm truncate">{currentUser.name}</h4>
             </div>
-            <p className="text-[11px] font-serif italic text-[#123E33]/80">Nível: {currentUser.role}</p>
+            <p className="text-[11px] font-serif italic text-[#123E33]/80">Nível: {getFriendlyRoleName(currentUser.role)}</p>
             <p className="text-[10px] text-gray-500 uppercase tracking-tighter truncate max-w-[200px]" title={currentUserAdmName}>
               {currentUserAdmName}
             </p>
