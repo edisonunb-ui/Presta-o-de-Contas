@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { collection, addDoc, doc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { User, Folder, FileEntry } from "../types";
-import { FolderKanban, FileText, UploadCloud, Trash2, Download, Plus, AlertCircle, FileCheck, FolderClosed, FolderOpen, Eye, Printer } from "lucide-react";
+import { FolderKanban, FileText, UploadCloud, Trash2, Download, Plus, AlertCircle, FileCheck, FolderClosed, FolderOpen, Eye, Printer, ExternalLink } from "lucide-react";
 
 interface FoldersTabProps {
   currentUser: User;
@@ -105,6 +105,18 @@ export default function FoldersTab({
 
   // Filter files for the selected folder
   const filteredFiles = files.filter((file) => file.folderId === selectedFolderId);
+
+  // Auto-select the first folder when switching condominiums or when folders list changes
+  React.useEffect(() => {
+    if (filteredFolders.length > 0) {
+      const exists = filteredFolders.some((f) => f.id === selectedFolderId);
+      if (!selectedFolderId || !exists) {
+        setSelectedFolderId(filteredFolders[0].id);
+      }
+    } else {
+      setSelectedFolderId(null);
+    }
+  }, [selectedCondominiumId, filteredFolders.length, selectedFolderId]);
 
   // Create folder
   const handleCreateFolder = async (e: React.FormEvent) => {
@@ -396,6 +408,17 @@ export default function FoldersTab({
             </button>
           )}
         </div>
+
+        {!canCreateOrDeleteFolders && !canUploadFiles && (
+          <div className="mb-4 p-3 bg-[#EEF2F0]/80 border border-[#123E33]/20 text-left">
+            <p className="text-[10px] font-sans font-bold uppercase tracking-wider text-[#123E33] flex items-center gap-1">
+              <FileCheck className="w-3.5 h-3.5" /> Pasta em Evidência
+            </p>
+            <p className="text-[10px] text-gray-600 font-serif italic mt-1">
+              Seu acesso permite visualizar, imprimir e baixar os documentos de prestação de contas deste condomínio.
+            </p>
+          </div>
+        )}
 
         {isCreatingFolder && (
           <form
@@ -715,6 +738,15 @@ export default function FoldersTab({
                 </h3>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={viewingUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 bg-[#123E33] hover:bg-[#1c5d4d] text-white text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1.5 no-underline border border-[#123E33]"
+                  title="Abrir visualização do PDF em uma nova aba do navegador"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Abrir em Nova Guia
+                </a>
                 <button
                   onClick={() => handlePrintFile(viewingFile)}
                   className="px-3 py-1.5 border border-[#111111] bg-white hover:bg-[#F4F2EE] text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1.5"
@@ -733,6 +765,14 @@ export default function FoldersTab({
                 >
                   Fechar
                 </button>
+              </div>
+            </div>
+
+            {/* Banner explicativo sobre bloqueio de iframe do navegador */}
+            <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 text-left flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-[10px] leading-relaxed">
+                <strong className="uppercase tracking-wider">Dica do Navegador:</strong> Se o documento PDF exibir um erro ou não carregar abaixo devido às restrições de segurança do iframe do AI Studio, clique no botão verde <strong className="font-sans font-bold">"ABRIR EM NOVA GUIA"</strong> acima para visualizar e imprimir nativamente com total compatibilidade.
               </div>
             </div>
 

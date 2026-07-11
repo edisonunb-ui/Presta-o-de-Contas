@@ -419,6 +419,15 @@ export default function App() {
     ? administradoras.find((a) => a.id === currentUser.administradoraId)?.name
     : "Portal de Condomínios";
 
+  // Dynamic tab permissions based on role & granular settings
+  const canViewFolders = currentUser ? (currentUser.role === "SuperADM" || currentUser.permissions?.folders_view !== false) : false;
+  const canViewProtocols = currentUser ? (currentUser.role === "SuperADM" || currentUser.permissions?.protocols_view === true) : false;
+  const canViewAdmin = currentUser ? (
+    currentUser.role === "SuperADM" || 
+    (currentUser.role === "Administrador" && (currentUser.permissions?.register_sindicos === true || currentUser.permissions?.register_condos === true))
+  ) : false;
+  const canViewAudit = currentUser ? (currentUser.role === "SuperADM" || currentUser.permissions?.view_audit_logs === true) : false;
+
   if (isSeeding) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#FAF9F6] border-8 border-[#123E33]">
@@ -947,35 +956,35 @@ export default function App() {
           </div>
         </header>
 
-        {(selectedCondominiumId || currentUser.role === "SuperADM" || currentUser.role === "Administrador") && (
+        {(canViewFolders || canViewProtocols || canViewAdmin || canViewAudit) && (
           <div className="bg-[#EEF2F0] border-b border-[#123E33] px-6 py-3 flex flex-wrap gap-2">
-            {selectedCondominiumId && (
-              <>
-                <button
-                  id="foldersTab"
-                  onClick={() => setActiveTab("folders")}
-                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
-                    activeTab === "folders"
-                      ? "bg-[#123E33] text-white border-[#123E33]"
-                      : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
-                  }`}
-                >
-                  <FolderKanban className="w-4 h-4" /> Pastas
-                </button>
-                <button
-                  id="protocolsTab"
-                  onClick={() => setActiveTab("protocols")}
-                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
-                    activeTab === "protocols"
-                      ? "bg-[#123E33] text-white border-[#123E33]"
-                      : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
-                  }`}
-                >
-                  <HelpCircle className="w-4 h-4" /> Protocolos
-                </button>
-              </>
+            {selectedCondominiumId && canViewFolders && (
+              <button
+                id="foldersTab"
+                onClick={() => setActiveTab("folders")}
+                className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
+                  activeTab === "folders"
+                    ? "bg-[#123E33] text-white border-[#123E33]"
+                    : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
+                }`}
+              >
+                <FolderKanban className="w-4 h-4" /> Pastas
+              </button>
             )}
-            {(currentUser.role === "SuperADM" || currentUser.role === "Administrador") && (
+            {selectedCondominiumId && canViewProtocols && (
+              <button
+                id="protocolsTab"
+                onClick={() => setActiveTab("protocols")}
+                className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
+                  activeTab === "protocols"
+                    ? "bg-[#123E33] text-white border-[#123E33]"
+                    : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
+                }`}
+              >
+                <HelpCircle className="w-4 h-4" /> Protocolos
+              </button>
+            )}
+            {canViewAdmin && (
               <button
                 id="adminTab"
                 onClick={() => setActiveTab("admin")}
@@ -988,17 +997,19 @@ export default function App() {
                 <Users className="w-4 h-4" /> Controle de Acesso
               </button>
             )}
-            <button
-              id="auditTab"
-              onClick={() => setActiveTab("audit")}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
-                activeTab === "audit"
-                  ? "bg-[#123E33] text-white border-[#123E33]"
-                  : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
-              }`}
-            >
-              <ShieldCheck className="w-4 h-4" /> Auditoria
-            </button>
+            {canViewAudit && (
+              <button
+                id="auditTab"
+                onClick={() => setActiveTab("audit")}
+                className={`flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
+                  activeTab === "audit"
+                    ? "bg-[#123E33] text-white border-[#123E33]"
+                    : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
+                }`}
+              >
+                <ShieldCheck className="w-4 h-4" /> Auditoria
+              </button>
+            )}
           </div>
         )}
 
@@ -1061,7 +1072,7 @@ export default function App() {
                 Selecione um condomínio na barra lateral para acessar as pastas mensais de prestação de contas, fazer downloads de relatórios ou abrir chamados/demandas técnicas.
               </p>
 
-              {(currentUser.role === "SuperADM" || currentUser.role === "Administrador") && (
+              {canViewAdmin && (
                 <div className="mt-8 pt-6 border-t border-[#123E33]/20 w-full max-w-sm">
                   <p className="text-[10px] uppercase font-bold tracking-widest opacity-60 mb-3">Acesso Administrativo:</p>
                   <button
