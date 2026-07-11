@@ -797,55 +797,6 @@ export default function App() {
                   {/* Apenas o SuperADM pode cadastrar novos usuários internamente */}
                 </>
               )}
-
-              <div className="pt-6 space-y-3">
-                <span className="text-[9px] font-bold text-[#123E33]/40 uppercase tracking-widest block">
-                  Acesso Rápido para Demonstração:
-                </span>
-                <div className="grid grid-cols-1 gap-2 text-xs">
-                  <div
-                    onClick={() => {
-                      setLoginEmail("edisonunb@gmail.com");
-                      setLoginPassword("123mudar");
-                    }}
-                    className="p-3 border border-[#123E33]/20 hover:border-[#123E33] bg-[#FAF9F6] hover:bg-white cursor-pointer transition-colors flex items-center justify-between rounded-lg"
-                  >
-                    <div>
-                      <div className="font-bold text-[#123E33]">SuperADM (Edison)</div>
-                      <div className="text-[10px] opacity-60 font-mono">edisonunb@gmail.com / 123mudar</div>
-                    </div>
-                    <span className="text-[10px] uppercase font-bold tracking-widest opacity-60">Selecionar</span>
-                  </div>
-
-                  <div
-                    onClick={() => {
-                      setLoginEmail("adm.alpha@portal.local");
-                      setLoginPassword("adm123");
-                    }}
-                    className="p-3 border border-[#123E33]/20 hover:border-[#123E33] bg-[#FAF9F6] hover:bg-white cursor-pointer transition-colors flex items-center justify-between rounded-lg"
-                  >
-                    <div>
-                      <div className="font-bold text-[#123E33]">Administrador Alpha</div>
-                      <div className="text-[10px] opacity-60 font-mono">adm.alpha@portal.local / adm123</div>
-                    </div>
-                    <span className="text-[10px] uppercase font-bold tracking-widest opacity-60">Selecionar</span>
-                  </div>
-
-                  <div
-                    onClick={() => {
-                      setLoginEmail("sindico.alpha@portal.local");
-                      setLoginPassword("sindico123");
-                    }}
-                    className="p-3 border border-[#123E33]/20 hover:border-[#123E33] bg-[#FAF9F6] hover:bg-white cursor-pointer transition-colors flex items-center justify-between rounded-lg"
-                  >
-                    <div>
-                      <div className="font-bold text-[#123E33]">Síndico (Carlos)</div>
-                      <div className="text-[10px] opacity-60 font-mono">sindico.alpha@portal.local / sindico123</div>
-                    </div>
-                    <span className="text-[10px] uppercase font-bold tracking-widest opacity-60">Selecionar</span>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </div>

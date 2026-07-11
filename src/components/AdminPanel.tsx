@@ -1,8 +1,8 @@
 import React, { useState } from "react";
-import { collection, addDoc, doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, addDoc, doc, updateDoc, deleteDoc, getDocs, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { User, Administradora, Condominium, UserPermissions } from "../types";
-import { Building2, Shield, UserCog, Plus, Trash2, Key, Users, CheckSquare, Folder, FolderOpen, ChevronRight, ChevronDown, User as UserIcon } from "lucide-react";
+import { Building2, Shield, UserCog, Plus, Trash2, Key, Users, CheckSquare, Folder, FolderOpen, ChevronRight, ChevronDown, User as UserIcon, Database, Download, Upload, FileJson, RefreshCw } from "lucide-react";
 
 interface AdminPanelProps {
   currentUser: User;
@@ -68,6 +68,11 @@ export default function AdminPanel({
       [key]: prev[key] === false ? true : false
     }));
   };
+
+  // Backup / Restore states
+  const [selectedCondoForBkp, setSelectedCondoForBkp] = useState("");
+  const [isBackupLoading, setIsBackupLoading] = useState(false);
+  const [backupProgress, setBackupProgress] = useState("");
 
   // Forms states
   const [admName, setAdmName] = useState("");
@@ -229,6 +234,236 @@ export default function AdminPanel({
       console.error(error);
       showAlert("Erro", "Erro ao atualizar usuário: " + (error instanceof Error ? error.message : String(error)));
     }
+  };
+
+  // Backup & Restore Actions
+  const handleExportGeral = async () => {
+    setIsBackupLoading(true);
+    setBackupProgress("Buscando dados de todo o sistema...");
+    try {
+      const collections = [
+        "administradoras",
+        "condominios",
+        "usuarios",
+        "pastas",
+        "arquivos",
+        "protocolos",
+        "mensagens",
+        "auditoria"
+      ];
+      
+      const backupData: Record<string, any[]> = {};
+      
+      for (const coll of collections) {
+        setBackupProgress(`Buscando ${coll}...`);
+        const snap = await getDocs(collection(db, coll));
+        backupData[coll] = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      }
+      
+      const fileData = {
+        type: "portal_backup_geral",
+        version: "1.0",
+        exportedAt: new Date().toISOString(),
+        exportedBy: currentUser.name,
+        data: backupData
+      };
+      
+      const blob = new Blob([JSON.stringify(fileData, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `bkp_geral_${new Date().toISOString().split('T')[0]}_${Date.now()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      onAddAuditLog("Backup Geral Exportado", "SuperADM exportou backup completo do sistema.");
+      showAlert("Sucesso", "Backup Geral do portal exportado com sucesso!");
+    } catch (error) {
+      console.error(error);
+      showAlert("Erro", "Erro ao exportar backup geral: " + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      setIsBackupLoading(false);
+      setBackupProgress("");
+    }
+  };
+
+  const handleExportCondo = async () => {
+    if (!selectedCondoForBkp) {
+      showAlert("Aviso", "Por favor, selecione um condomínio para exportar o backup.");
+      return;
+    }
+    
+    setIsBackupLoading(true);
+    setBackupProgress("Buscando dados vinculados...");
+    try {
+      const condoId = selectedCondoForBkp;
+      const targetCondo = condominios.find(c => c.id === condoId);
+      if (!targetCondo) {
+        showAlert("Erro", "Condomínio não encontrado.");
+        return;
+      }
+      
+      const backupData: Record<string, any[]> = {
+        condominios: [{ id: targetCondo.id, name: targetCondo.name, administradoraId: targetCondo.administradoraId || "", createdAt: targetCondo.createdAt }]
+      };
+      
+      if (targetCondo.administradoraId) {
+        const adm = administradoras.find(a => a.id === targetCondo.administradoraId);
+        if (adm) {
+          backupData["administradoras"] = [{ id: adm.id, name: adm.name, createdAt: adm.createdAt }];
+        }
+      }
+      
+      // Get associated users
+      const associatedUsers = usuarios.filter(u => u.condominiumIds?.includes(condoId));
+      backupData["usuarios"] = associatedUsers;
+      
+      // Get folders for this condo
+      setBackupProgress("Buscando pastas do condomínio...");
+      const foldersSnap = await getDocs(collection(db, "pastas"));
+      const condoFolders = foldersSnap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() as any }))
+        .filter(f => f.condominiumId === condoId);
+      backupData["pastas"] = condoFolders;
+      
+      const folderIds = condoFolders.map(f => f.id);
+      
+      // Get files for folders
+      setBackupProgress("Buscando arquivos...");
+      const filesSnap = await getDocs(collection(db, "arquivos"));
+      const condoFiles = filesSnap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() as any }))
+        .filter(f => folderIds.includes(f.folderId));
+      backupData["arquivos"] = condoFiles;
+      
+      // Get protocols
+      setBackupProgress("Buscando atendimentos...");
+      const protocolsSnap = await getDocs(collection(db, "protocolos"));
+      const condoProtocols = protocolsSnap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() as any }))
+        .filter(p => p.condominiumId === condoId);
+      backupData["protocolos"] = condoProtocols;
+      
+      const protocolIds = condoProtocols.map(p => p.id);
+      
+      // Get messages for protocols
+      setBackupProgress("Buscando mensagens...");
+      const messagesSnap = await getDocs(collection(db, "mensagens"));
+      const condoMessages = messagesSnap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() as any }))
+        .filter(m => protocolIds.includes(m.protocolId));
+      backupData["mensagens"] = condoMessages;
+      
+      const fileData = {
+        type: "portal_backup_condominio",
+        version: "1.0",
+        condoId: condoId,
+        condoName: targetCondo.name,
+        exportedAt: new Date().toISOString(),
+        exportedBy: currentUser.name,
+        data: backupData
+      };
+      
+      const blob = new Blob([JSON.stringify(fileData, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `bkp_condo_${targetCondo.name.replace(/\s+/g, '_')}_${Date.now()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      onAddAuditLog("Backup Condomínio Exportado", `SuperADM exportou backup do condomínio ${targetCondo.name}.`);
+      showAlert("Sucesso", `Backup do condomínio "${targetCondo.name}" exportado com sucesso!`);
+    } catch (error) {
+      console.error(error);
+      showAlert("Erro", "Erro ao exportar backup de condomínio: " + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      setIsBackupLoading(false);
+      setBackupProgress("");
+    }
+  };
+
+  const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target?.result as string;
+        const backupObj = JSON.parse(text);
+        
+        if (!backupObj || (backupObj.type !== "portal_backup_geral" && backupObj.type !== "portal_backup_condominio")) {
+          showAlert("Erro de Formato", "O arquivo selecionado não é um backup válido do portal.");
+          return;
+        }
+        
+        const isGeral = backupObj.type === "portal_backup_geral";
+        const title = isGeral ? "Restaurar Backup Geral" : "Restaurar Backup de Condomínio";
+        const details = isGeral 
+          ? `Este arquivo de Backup Geral contém dados exportados em ${new Date(backupObj.exportedAt).toLocaleString("pt-BR")}. Deseja mesmo restaurar esses dados? (Registros com o mesmo ID serão atualizados/sobrescritos)`
+          : `Este arquivo de Backup contém dados do condomínio "${backupObj.condoName}" exportados em ${new Date(backupObj.exportedAt).toLocaleString("pt-BR")}. Deseja mesmo restaurar esses dados?`;
+          
+        showConfirm(title, details, async () => {
+          setIsBackupLoading(true);
+          setBackupProgress("Iniciando restauração...");
+          
+          try {
+            const data = backupObj.data;
+            let totalImported = 0;
+            const summary: Record<string, number> = {};
+            
+            for (const collectionName in data) {
+              const records = data[collectionName];
+              if (!Array.isArray(records)) continue;
+              
+              setBackupProgress(`Restaurando ${collectionName} (${records.length} itens)...`);
+              summary[collectionName] = 0;
+              
+              for (const record of records) {
+                const { id, ...docFields } = record;
+                if (!id) continue;
+                
+                await setDoc(doc(db, collectionName, id), docFields);
+                summary[collectionName]++;
+                totalImported++;
+              }
+            }
+            
+            onAddAuditLog(
+              "Backup Importado", 
+              `SuperADM importou backup ${isGeral ? "geral" : `do condomínio ${backupObj.condoName}`} com ${totalImported} registros.`
+            );
+            
+            const summaryText = Object.entries(summary)
+              .map(([coll, count]) => `• ${coll}: ${count} itens`)
+              .join("\n");
+              
+            showAlert(
+              "Restauração Concluída", 
+              `Backup restaurado com sucesso!\nTotal de registros importados/atualizados: ${totalImported}\n\nResumo:\n${summaryText}`
+            );
+            onRefresh();
+          } catch (err) {
+            console.error(err);
+            showAlert("Erro na Restauração", "Erro ao gravar dados no banco: " + (err instanceof Error ? err.message : String(err)));
+          } finally {
+            setIsBackupLoading(false);
+            setBackupProgress("");
+            e.target.value = "";
+          }
+        });
+      } catch (err) {
+        console.error(err);
+        showAlert("Erro de Leitura", "Erro ao processar o arquivo JSON: " + (err instanceof Error ? err.message : String(err)));
+        e.target.value = "";
+      }
+    };
+    reader.readAsText(file);
   };
 
   // Submitting Administradora
@@ -463,31 +698,121 @@ export default function AdminPanel({
       {/* SUB-TAB: ADMINISTRADORAS (SuperADM Only) */}
       {activeSubTab === "adms" && currentUser.role === "SuperADM" && (
         <div id="admsSection" className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-1 bg-white p-6 border border-[#111111] rounded-none shadow-none">
-            <h3 className="font-serif italic text-xl text-[#111111] mb-6 flex items-center gap-2">
-              <Plus className="w-5 h-5 text-[#111111]" /> Cadastrar Administradora
-            </h3>
-            <form onSubmit={handleCreateAdm} className="space-y-5">
-              <div>
-                <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-2">
-                  Nome da Administradora
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ex: Nunes Informática & Gestão"
-                  value={admName}
-                  onChange={(e) => setAdmName(e.target.value)}
-                  className="w-full px-4 py-3 border border-[#111111] rounded-none bg-white outline-none focus:bg-[#F4F2EE] text-sm"
-                  required
-                />
-              </div>
-              <button
-                type="submit"
-                className="w-full bg-[#111111] hover:bg-[#C2A87E] text-white font-bold py-3.5 text-xs uppercase tracking-widest transition-colors cursor-pointer rounded-none border border-[#111111]"
-              >
-                Cadastrar Administradora
-              </button>
-            </form>
+          <div className="lg:col-span-1 space-y-8">
+            <div className="bg-white p-6 border border-[#111111] rounded-none shadow-none">
+              <h3 className="font-serif italic text-xl text-[#111111] mb-6 flex items-center gap-2">
+                <Plus className="w-5 h-5 text-[#111111]" /> Cadastrar Administradora
+              </h3>
+              <form onSubmit={handleCreateAdm} className="space-y-5">
+                <div>
+                  <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-2">
+                    Nome da Administradora
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Nunes Informática & Gestão"
+                    value={admName}
+                    onChange={(e) => setAdmName(e.target.value)}
+                    className="w-full px-4 py-3 border border-[#111111] rounded-none bg-white outline-none focus:bg-[#F4F2EE] text-sm"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-[#111111] hover:bg-[#C2A87E] text-white font-bold py-3.5 text-xs uppercase tracking-widest transition-colors cursor-pointer rounded-none border border-[#111111]"
+                >
+                  Cadastrar Administradora
+                </button>
+              </form>
+            </div>
+
+            <div className="bg-white p-6 border border-[#111111] rounded-none shadow-none">
+              <h3 className="font-serif italic text-xl text-[#111111] mb-4 flex items-center gap-2">
+                <Database className="w-5 h-5 text-[#123E33]" /> Backup do Sistema
+              </h3>
+              <p className="text-[11px] text-gray-500 mb-6 leading-relaxed">
+                Utilitário de segurança para cópia e restauração de dados do portal.
+              </p>
+
+              {isBackupLoading ? (
+                <div className="flex flex-col items-center justify-center p-6 border border-dashed border-[#111111]/30 bg-[#FAF9F6] animate-pulse">
+                  <RefreshCw className="w-8 h-8 text-[#123E33] animate-spin mb-3" />
+                  <span className="text-xs font-bold text-[#111111] uppercase tracking-wider">Processando...</span>
+                  <span className="text-[10px] text-gray-500 mt-1 font-mono text-center">{backupProgress}</span>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* 1. Backup Geral */}
+                  <div className="space-y-2">
+                    <span className="text-[9px] font-bold text-[#111111] uppercase tracking-widest block">
+                      Backup Geral Completo
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleExportGeral}
+                      className="w-full bg-[#123E33] hover:bg-[#1c5c4c] text-white font-bold py-3 px-4 text-[10px] uppercase tracking-widest transition-colors cursor-pointer rounded-none border border-[#123E33] flex items-center justify-center gap-2"
+                    >
+                      <Download className="w-4 h-4" /> Exportar BKP Geral
+                    </button>
+                  </div>
+
+                  <hr className="border-[#111111]/10" />
+
+                  {/* 2. Backup do Condomínio */}
+                  <div className="space-y-3">
+                    <span className="text-[9px] font-bold text-[#111111] uppercase tracking-widest block">
+                      Backup de Condomínio
+                    </span>
+                    <div>
+                      <select
+                        value={selectedCondoForBkp}
+                        onChange={(e) => setSelectedCondoForBkp(e.target.value)}
+                        className="w-full px-3 py-2.5 border border-[#111111] rounded-none bg-white outline-none text-xs font-bold"
+                      >
+                        <option value="">-- Escolha o Condomínio --</option>
+                        {condominios.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            🏢 {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleExportCondo}
+                      disabled={!selectedCondoForBkp}
+                      className={`w-full font-bold py-3 px-4 text-[10px] uppercase tracking-widest transition-all rounded-none border flex items-center justify-center gap-2 cursor-pointer ${
+                        selectedCondoForBkp
+                          ? "bg-white border-[#111111] text-[#111111] hover:bg-gray-50"
+                          : "bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed"
+                      }`}
+                    >
+                      <FileJson className="w-4 h-4" /> Exportar BKP Condomínio
+                    </button>
+                  </div>
+
+                  <hr className="border-[#111111]/10" />
+
+                  {/* 3. Carregar / Restaurar Backup */}
+                  <div className="space-y-2">
+                    <span className="text-[9px] font-bold text-red-800 uppercase tracking-widest block">
+                      Carregar / Restaurar BKP
+                    </span>
+                    <label className="w-full bg-red-50/50 hover:bg-red-50 text-red-700 hover:text-red-900 border border-dashed border-red-200 hover:border-red-400 py-4 px-4 text-center rounded-none cursor-pointer flex flex-col items-center justify-center gap-1 transition-all">
+                      <Upload className="w-5 h-5 text-red-600 mb-1" />
+                      <span className="text-[10px] font-bold uppercase tracking-wider">Selecionar Arquivo (.json)</span>
+                      <span className="text-[9px] text-gray-500 font-serif italic text-center">Restaura e recria as coleções</span>
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={handleImportBackup}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="lg:col-span-2 bg-white p-6 border border-[#111111] rounded-none shadow-none">
