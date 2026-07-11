@@ -85,8 +85,9 @@ export default function AdminPanel({
   const [editName, setEditName] = useState("");
   const [editEmail, setEditEmail] = useState("");
   const [editPassword, setEditPassword] = useState("");
-  const [editRole, setEditRole] = useState<"Administrador" | "Sindico">("Sindico");
+  const [editRole, setEditRole] = useState<"Administrador" | "Sindico" | "SuperADM">("Sindico");
   const [editSelectedCondos, setEditSelectedCondos] = useState<string[]>([]);
+  const [editAdmId, setEditAdmId] = useState("");
   const [editPermissions, setEditPermissions] = useState<Required<UserPermissions>>({
     folders_view: true,
     folders_create: false,
@@ -149,10 +150,13 @@ export default function AdminPanel({
     setEditName(user.name);
     setEditEmail(user.email);
     setEditPassword(user.password || "");
-    setEditRole(user.role as "Administrador" | "Sindico");
+    setEditRole(user.role as "Administrador" | "Sindico" | "SuperADM");
     setEditSelectedCondos(user.condominiumIds || []);
+    setEditAdmId(user.administradoraId || "");
     
-    const defaults = getRoleDefaultPermissions(user.role as "Administrador" | "Sindico");
+    const defaults = getRoleDefaultPermissions(
+      user.role === "SuperADM" ? "Administrador" : (user.role as "Administrador" | "Sindico")
+    );
     setEditPermissions({
       folders_view: user.permissions?.folders_view ?? defaults.folders_view,
       folders_create: user.permissions?.folders_create ?? defaults.folders_create,
@@ -193,6 +197,7 @@ export default function AdminPanel({
         password: editPassword.trim(),
         role: editRole,
         condominiumIds: editRole === "Sindico" ? editSelectedCondos : [],
+        administradoraId: editRole === "Administrador" ? editAdmId : (editingUser.administradoraId || ""),
         permissions: editPermissions,
       });
 
@@ -1008,6 +1013,24 @@ export default function AdminPanel({
                               {administradoras.find((a) => a.id === u.administradoraId)?.name || "Administradora"}
                             </div>
                           )}
+                          <div className="flex flex-wrap items-center gap-2 mt-2">
+                            <button
+                              onClick={() => handleStartEditUser(u)}
+                              className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest bg-stone-100 hover:bg-[#C2A87E] text-[#111111] hover:text-white border border-[#111111]/20 hover:border-[#C2A87E] px-2 py-1 transition-all cursor-pointer rounded-none"
+                              title="Editar Permissões e Dados"
+                            >
+                              <UserCog className="w-3 h-3" /> Editar
+                            </button>
+                            {u.id !== currentUser.id && (
+                              <button
+                                onClick={() => handleDeleteUser(u.id, u.name, u.email)}
+                                className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest bg-white hover:bg-red-50 text-red-700 hover:text-red-900 border border-red-200 hover:border-red-400 px-2 py-1 transition-all cursor-pointer rounded-none"
+                                title="Excluir Usuário"
+                              >
+                                <Trash2 className="w-3 h-3" /> Excluir
+                              </button>
+                            )}
+                          </div>
                         </td>
                         <td className="py-4 px-4 text-xs text-gray-700">
                           <div className="font-mono">{u.email}</div>
@@ -1147,17 +1170,43 @@ export default function AdminPanel({
                 <select
                   value={editRole}
                   onChange={(e) => {
-                    const nextRole = e.target.value as "Administrador" | "Sindico";
+                    const nextRole = e.target.value as "Administrador" | "Sindico" | "SuperADM";
                     setEditRole(nextRole);
-                    setEditPermissions(getRoleDefaultPermissions(nextRole));
+                    setEditPermissions(
+                      getRoleDefaultPermissions(nextRole === "SuperADM" ? "Administrador" : nextRole)
+                    );
                   }}
                   className="w-full px-3 py-2 border border-[#111111] rounded-none bg-white text-sm outline-none focus:bg-[#F4F2EE]"
                   required
                 >
                   <option value="Sindico">Síndico (Apenas Visualização por padrão)</option>
                   <option value="Administrador">Administrador (Gestor por padrão)</option>
+                  {editRole === "SuperADM" && (
+                    <option value="SuperADM">Super ADM (Acesso Total)</option>
+                  )}
                 </select>
               </div>
+
+              {editRole === "Administrador" && currentUser.role === "SuperADM" && (
+                <div>
+                  <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-1.5">
+                    Vincular à Administradora
+                  </label>
+                  <select
+                    value={editAdmId}
+                    onChange={(e) => setEditAdmId(e.target.value)}
+                    className="w-full px-3 py-2 border border-[#111111] rounded-none bg-white text-sm outline-none focus:bg-[#F4F2EE]"
+                    required
+                  >
+                    <option value="">Selecione...</option>
+                    {administradoras.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {editRole === "Sindico" && (
                 <div>

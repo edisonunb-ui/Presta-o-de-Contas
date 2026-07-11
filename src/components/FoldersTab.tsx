@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { collection, addDoc, doc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { User, Folder, FileEntry } from "../types";
-import { FolderKanban, FileText, UploadCloud, Trash2, Download, Plus, AlertCircle, FileCheck, FolderClosed, FolderOpen } from "lucide-react";
+import { FolderKanban, FileText, UploadCloud, Trash2, Download, Plus, AlertCircle, FileCheck, FolderClosed, FolderOpen, Eye, Printer } from "lucide-react";
 
 interface FoldersTabProps {
   currentUser: User;
@@ -39,6 +39,8 @@ export default function FoldersTab({
   condominiumName,
 }: FoldersTabProps) {
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [viewingFile, setViewingFile] = useState<FileEntry | null>(null);
+  const [viewingUrl, setViewingUrl] = useState<string | null>(null);
   
   // Custom Modal configuration
   const [modalConfig, setModalConfig] = useState<{
@@ -239,6 +241,64 @@ export default function FoldersTab({
     } catch (err) {
       console.error(err);
       showAlert("Erro de Download", "Falha no download do PDF. Exibindo alternativa de texto.");
+    }
+  };
+
+  // View PDF File logic
+  const handleViewFile = (file: FileEntry) => {
+    try {
+      const byteCharacters = atob(file.content);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      setViewingFile(file);
+      setViewingUrl(url);
+    } catch (err) {
+      console.error(err);
+      showAlert("Erro de Visualização", "Não foi possível carregar a visualização do PDF.");
+    }
+  };
+
+  const handleCloseViewer = () => {
+    if (viewingUrl) {
+      URL.revokeObjectURL(viewingUrl);
+    }
+    setViewingFile(null);
+    setViewingUrl(null);
+  };
+
+  // Print PDF File logic
+  const handlePrintFile = (file: FileEntry) => {
+    try {
+      const byteCharacters = atob(file.content);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      
+      const iframe = document.createElement("iframe");
+      iframe.style.display = "none";
+      iframe.src = url;
+      document.body.appendChild(iframe);
+      
+      iframe.onload = () => {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+        setTimeout(() => {
+          document.body.removeChild(iframe);
+          URL.revokeObjectURL(url);
+        }, 5000);
+      };
+    } catch (err) {
+      console.error(err);
+      showAlert("Erro de Impressão", "Falha ao preparar o arquivo para impressão.");
     }
   };
 
@@ -536,17 +596,36 @@ export default function FoldersTab({
                         </div>
                       </div>
 
-                      <div className="mt-4 pt-4 border-t border-[#111111]/10 flex items-center justify-end gap-2">
+                      <div className="mt-4 pt-4 border-t border-[#111111]/10 flex flex-wrap items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleViewFile(file)}
+                          className="px-3.5 py-2 border border-[#111111] bg-white hover:bg-[#F4F2EE] text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1.5"
+                          title="Visualizar documento PDF na tela"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> Visualizar
+                        </button>
+
                         <button
                           onClick={() => handleDownloadFile(file)}
-                          className="px-4 py-2 border border-[#111111] hover:bg-[#F4F2EE] text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1"
+                          className="px-3.5 py-2 border border-[#111111] bg-white hover:bg-[#F4F2EE] text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1.5"
+                          title="Fazer download do arquivo PDF"
                         >
-                          <Download className="w-3.5 h-3.5" /> Baixar Pasta Digitalizada
+                          <Download className="w-3.5 h-3.5" /> Baixar
                         </button>
+
+                        <button
+                          onClick={() => handlePrintFile(file)}
+                          className="px-3.5 py-2 border border-[#111111] bg-white hover:bg-[#F4F2EE] text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1.5"
+                          title="Imprimir documento PDF"
+                        >
+                          <Printer className="w-3.5 h-3.5" /> Imprimir
+                        </button>
+
                         {canDeleteFiles && (
                           <button
                             onClick={() => handleDeleteFile(file.id, file.name)}
-                            className="px-4 py-2 border border-red-700 text-red-700 hover:bg-red-50 text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1"
+                            className="px-3.5 py-2 border border-red-700 text-red-700 hover:bg-red-50 text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1.5"
+                            title="Excluir arquivo permanentemente"
                           >
                             <Trash2 className="w-3.5 h-3.5" /> Excluir
                           </button>
@@ -614,6 +693,60 @@ export default function FoldersTab({
                 </button>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: VISUALIZAR PDF */}
+      {viewingFile && viewingUrl && (
+        <div id="viewPdfModal" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div 
+            className="absolute inset-0 bg-black/50 backdrop-blur-xs transition-opacity"
+            onClick={handleCloseViewer}
+          />
+          <div className="relative bg-[#FAF9F6] border border-[#111111] p-6 max-w-5xl w-full h-[90vh] flex flex-col shadow-2xl z-10 space-y-4">
+            <div className="border-b border-[#111111]/10 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <span className="text-[9px] uppercase tracking-[0.2em] font-bold text-gray-400 block">
+                  Visualização de Documento
+                </span>
+                <h3 className="font-serif italic text-lg text-[#111111] truncate max-w-sm sm:max-w-md md:max-w-lg mt-0.5" title={viewingFile.name}>
+                  {viewingFile.name}
+                </h3>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => handlePrintFile(viewingFile)}
+                  className="px-3 py-1.5 border border-[#111111] bg-white hover:bg-[#F4F2EE] text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Printer className="w-3.5 h-3.5" /> Imprimir
+                </button>
+                <button
+                  onClick={() => handleDownloadFile(viewingFile)}
+                  className="px-3 py-1.5 border border-[#111111] bg-white hover:bg-[#F4F2EE] text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" /> Baixar
+                </button>
+                <button
+                  onClick={handleCloseViewer}
+                  className="px-3 py-1.5 bg-[#111111] hover:bg-stone-800 text-white border border-[#111111] text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 bg-stone-100 border border-[#111111]/20 relative overflow-hidden">
+              <iframe
+                src={viewingUrl}
+                className="w-full h-full border-none"
+                title={viewingFile.name}
+              />
+            </div>
+            
+            <p className="text-[10px] text-gray-400 font-serif italic text-right">
+              Tamanho: {(viewingFile.size / (1024 * 1024)).toFixed(2)} MB • Enviado por: {viewingFile.uploadedBy.toUpperCase()} • Data: {new Date(viewingFile.uploadedAt).toLocaleDateString("pt-BR")}
+            </p>
           </div>
         </div>
       )}
