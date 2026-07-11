@@ -10,19 +10,30 @@ export async function seedDatabaseIfEmpty() {
     const edisonDoc = usersSnapshot.docs.find(
       doc => doc.data().email?.toLowerCase() === "edisonunb@gmail.com"
     );
-    const userSuperId = edisonDoc ? edisonDoc.id : "user_super_adm";
     
-    // Forçamos a senha e a regra de primeiro acesso para garantir o login inicial dele
-    await setDoc(doc(db, "usuarios", userSuperId), {
-      id: userSuperId,
-      email: "edisonunb@gmail.com",
-      password: "123mudar",
-      name: "Edison Nunes (SuperADM)",
-      role: "SuperADM",
-      firstAccess: true,
-      createdAt: new Date().toISOString()
-    }, { merge: true });
-    console.log("SuperADM edisonunb@gmail.com garantido/criado com sucesso!");
+    if (!edisonDoc) {
+      const userSuperId = "user_super_adm";
+      await setDoc(doc(db, "usuarios", userSuperId), {
+        id: userSuperId,
+        email: "edisonunb@gmail.com",
+        password: "123456",
+        name: "Edison Nunes (SuperADM)",
+        role: "SuperADM",
+        firstAccess: false,
+        createdAt: new Date().toISOString()
+      });
+      console.log("SuperADM edisonunb@gmail.com criado com sucesso com senha 123456!");
+    } else {
+      const currentData = edisonDoc.data();
+      // Se a senha for "123mudar" (senha antiga), atualizamos para "123456" conforme pedido do usuário
+      if (currentData.password === "123mudar") {
+        await setDoc(doc(db, "usuarios", edisonDoc.id), {
+          password: "123456",
+          firstAccess: false
+        }, { merge: true });
+        console.log("SuperADM password atualizada de 123mudar para 123456.");
+      }
+    }
 
     if (!usersSnapshot.empty) {
       console.log("Database already initialized, skipping seed.");
