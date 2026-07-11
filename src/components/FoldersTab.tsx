@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { collection, addDoc, doc, updateDoc, deleteDoc } from "firebase/firestore";
+import { collection, addDoc, doc, updateDoc, deleteDoc, getDocs, query, orderBy } from "firebase/firestore";
 import { db } from "../firebase";
 import { User, Folder, FileEntry } from "../types";
 import { FolderKanban, FileText, UploadCloud, Trash2, Download, Plus, AlertCircle, FileCheck, FolderClosed, FolderOpen, Eye, Printer, ExternalLink } from "lucide-react";
@@ -77,7 +77,10 @@ export default function FoldersTab({
   // File Upload
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [uploadProgress, setUploadProgress] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [isPreparingFile, setIsPreparingFile] = useState(false);
+  const [preparingProgress, setPreparingProgress] = useState("");
 
   // Permission checks
   const hasPermission = (key: string, defaultVal: boolean) => {
@@ -103,8 +106,91 @@ export default function FoldersTab({
       return timeB - timeA; // Newest folders created by the user appear first!
     });
 
-  // Filter files for the selected folder
-  const filteredFiles = files.filter((file) => file.folderId === selectedFolderId);
+  // Helper to parse year and month from file name for chronological sorting
+  const parseFileDate = (fileName: string) => {
+    const cleanName = fileName
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, ""); // removes accents (ç -> c, á -> a, etc.)
+    
+    // Find year (any 4-digit number starting with 20 or 19)
+    const yearMatch = cleanName.match(/\b(20\d{2}|19\d{2})\b/);
+    const year = yearMatch ? parseInt(yearMatch[1], 10) : 9999; // Default to 9999 so files without years group together predictably
+
+    // Months list with full names and standard portuguese abbreviations
+    const monthsList = [
+      { name: "janeiro", month: 1 },
+      { name: "fevereiro", month: 2 },
+      { name: "marco", month: 3 },
+      { name: "abril", month: 4 },
+      { name: "maio", month: 5 },
+      { name: "junho", month: 6 },
+      { name: "julho", month: 7 },
+      { name: "agosto", month: 8 },
+      { name: "setembro", month: 9 },
+      { name: "outubro", month: 10 },
+      { name: "novembro", month: 11 },
+      { name: "dezembro", month: 12 },
+      // Shorthand abbreviations
+      { name: "jan", month: 1 },
+      { name: "fev", month: 2 },
+      { name: "mar", month: 3 },
+      { name: "abr", month: 4 },
+      { name: "mai", month: 5 },
+      { name: "jun", month: 6 },
+      { name: "jul", month: 7 },
+      { name: "ago", month: 8 },
+      { name: "set", month: 9 },
+      { name: "out", month: 10 },
+      { name: "nov", month: 11 },
+      { name: "dez", month: 12 }
+    ];
+
+    let month = 99; // Default to 99 so files without months go to the end
+    for (const m of monthsList) {
+      // Use regex with word boundaries first to avoid false partial matches (e.g. "mar" inside "marco")
+      const regex = new RegExp(`\\b${m.name}\\b`);
+      if (regex.test(cleanName)) {
+        month = m.month;
+        break;
+      }
+    }
+
+    // Fallback to simple inclusion if word boundary regex didn't find anything
+    if (month === 99) {
+      for (const m of monthsList) {
+        if (cleanName.includes(m.name)) {
+          month = m.month;
+          break;
+        }
+      }
+    }
+
+    return { year, month };
+  };
+
+  // Filter files for the selected folder and sort them chronologically by month and year parsed from the name
+  const filteredFiles = files
+    .filter((file) => file.folderId === selectedFolderId)
+    .sort((a, b) => {
+      const parsedA = parseFileDate(a.name);
+      const parsedB = parseFileDate(b.name);
+
+      // 1. Sort by year ascending (e.g. 2025 before 2026)
+      if (parsedA.year !== parsedB.year) {
+        return parsedA.year - parsedB.year;
+      }
+
+      // 2. Sort by month ascending (e.g. Janeiro before Fevereiro)
+      if (parsedA.month !== parsedB.month) {
+        return parsedA.month - parsedB.month;
+      }
+
+      // 3. Fallback: if month and year are identical or unparsed, sort by original upload time (descending)
+      const timeA = new Date(a.uploadedAt || 0).getTime();
+      const timeB = new Date(b.uploadedAt || 0).getTime();
+      return timeB - timeA;
+    });
 
   // Auto-select the first folder when switching condominiums or when folders list changes
   React.useEffect(() => {
@@ -168,74 +254,159 @@ export default function FoldersTab({
     }
   };
 
-  // Convert and save file to base64
-  const handleFileUpload = (file: File) => {
-    if (!selectedFolderId) return;
-    if (file.type !== "application/pdf") {
-      setUploadError("Apenas arquivos PDF são permitidos para prestação de contas.");
-      return;
+  // Helper to load file content (supporting both legacy non-chunked and new chunked files)
+  const getFileContent = async (file: FileEntry): Promise<string> => {
+    if (file.content && file.content.trim() !== "") {
+      return file.content;
     }
+    
+    setIsPreparingFile(true);
+    setPreparingProgress("Baixando fragmentos do arquivo...");
+    try {
+      const chunksSnap = await getDocs(
+        query(collection(db, "arquivos", file.id, "chunks"), orderBy("index", "asc"))
+      );
+      if (chunksSnap.empty) {
+        throw new Error("Conteúdo do arquivo não encontrado ou está corrompido.");
+      }
+      let fullContent = "";
+      chunksSnap.forEach((doc) => {
+        fullContent += doc.data().content || "";
+      });
+      return fullContent;
+    } catch (err) {
+      console.error("Error loading file content chunks:", err);
+      throw new Error("Erro ao carregar os fragmentos do arquivo: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsPreparingFile(false);
+      setPreparingProgress("");
+    }
+  };
 
-    // Limit to 4MB inside Firestore base64 to avoid token or size limit issues
-    if (file.size > 4 * 1024 * 1024) {
-      setUploadError("O tamanho máximo do arquivo é de 4MB.");
+  // Upload multiple files
+  const handleMultipleFilesUpload = async (filesList: File[]) => {
+    if (!selectedFolderId) return;
+
+    // Filter to only PDF files
+    const pdfFiles = filesList.filter(file => file.type === "application/pdf");
+    if (pdfFiles.length === 0) {
+      setUploadError("Apenas arquivos PDF são permitidos para prestação de contas.");
       return;
     }
 
     setIsUploading(true);
     setUploadError("");
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const base64String = (reader.result as string).split(",")[1];
-        
-        const docRef = await addDoc(collection(db, "arquivos"), {
-          folderId: selectedFolderId,
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          uploadedBy: currentUser.name,
-          uploadedAt: new Date().toISOString(),
-          content: base64String,
-        });
-        await updateDoc(doc(db, "arquivos", docRef.id), { id: docRef.id });
+    for (let i = 0; i < pdfFiles.length; i++) {
+      const file = pdfFiles[i];
+      setUploadProgress(`Enviando arquivo ${i + 1} de ${pdfFiles.length}: ${file.name}...`);
 
-        const folderObj = folders.find((f) => f.id === selectedFolderId);
-        const folderLabel = folderObj 
-          ? (folderObj.name || `${MONTHS_PT[folderObj.month - 1]}/${folderObj.year}`) 
-          : selectedFolderId;
-        
-        onAddAuditLog(
-          "Upload de Arquivo",
-          `Enviou o arquivo: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB) para a pasta: ${folderLabel} do condomínio ${condominiumName}`
-        );
-
-        onRefresh();
+      // Limit to 15MB
+      if (file.size > 15 * 1024 * 1024) {
+        setUploadError(`O arquivo "${file.name}" excede o tamanho máximo de 15MB.`);
         setIsUploading(false);
+        setUploadProgress("");
+        return;
+      }
+
+      try {
+        await uploadSingleFile(file);
       } catch (err) {
         console.error(err);
-        setUploadError("Falha ao salvar arquivo no Firestore.");
+        setUploadError(`Erro ao enviar o arquivo "${file.name}": ${err instanceof Error ? err.message : String(err)}`);
         setIsUploading(false);
+        setUploadProgress("");
+        return;
       }
-    };
-    reader.onerror = () => {
-      setUploadError("Erro ao ler o arquivo físico.");
-      setIsUploading(false);
-    };
-    reader.readAsDataURL(file);
+    }
+
+    setIsUploading(false);
+    setUploadProgress("");
+    onRefresh();
+  };
+
+  // Upload a single file (uses chunking for files > 700KB)
+  const uploadSingleFile = (file: File): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const base64String = (reader.result as string).split(",")[1];
+          const totalSize = file.size;
+
+          const CHUNK_SIZE = 700000; // ~700KB per chunk
+          const isLargeFile = base64String.length > CHUNK_SIZE;
+
+          const docData: any = {
+            folderId: selectedFolderId,
+            name: file.name,
+            size: totalSize,
+            type: file.type,
+            uploadedBy: currentUser.name,
+            uploadedAt: new Date().toISOString(),
+          };
+
+          if (!isLargeFile) {
+            docData.content = base64String;
+          } else {
+            docData.content = ""; // Empty string for large files, will read from chunks subcollection
+          }
+
+          const docRef = await addDoc(collection(db, "arquivos"), docData);
+          await updateDoc(doc(db, "arquivos", docRef.id), { id: docRef.id });
+
+          if (isLargeFile) {
+            // Save chunks
+            const numChunks = Math.ceil(base64String.length / CHUNK_SIZE);
+            for (let i = 0; i < numChunks; i++) {
+              const start = i * CHUNK_SIZE;
+              const end = Math.min(start + CHUNK_SIZE, base64String.length);
+              const chunkStr = base64String.substring(start, end);
+
+              // Add chunk to subcollection "chunks"
+              await addDoc(collection(db, "arquivos", docRef.id, "chunks"), {
+                index: i,
+                content: chunkStr,
+              });
+            }
+          }
+
+          const folderObj = folders.find((f) => f.id === selectedFolderId);
+          const folderLabel = folderObj 
+            ? (folderObj.name || `${MONTHS_PT[folderObj.month - 1]}/${folderObj.year}`) 
+            : selectedFolderId;
+          
+          onAddAuditLog(
+            "Upload de Arquivo",
+            `Enviou o arquivo: ${file.name} (${(totalSize / 1024 / 1024).toFixed(2)} MB) para a pasta: ${folderLabel} do condomínio ${condominiumName}`
+          );
+
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      };
+      reader.onerror = () => {
+        reject(new Error("Erro ao ler o arquivo físico."));
+      };
+      reader.readAsDataURL(file);
+    });
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFileUpload(e.target.files[0]);
+    if (e.target.files) {
+      const selectedFiles = Array.from(e.target.files) as unknown as File[];
+      if (selectedFiles.length > 0) {
+        handleMultipleFilesUpload(selectedFiles);
+      }
     }
   };
 
   // Download logic
-  const handleDownloadFile = (file: FileEntry) => {
+  const handleDownloadFile = async (file: FileEntry) => {
     try {
-      const byteCharacters = atob(file.content);
+      const content = await getFileContent(file);
+      const byteCharacters = atob(content);
       const byteNumbers = new Array(byteCharacters.length);
       for (let i = 0; i < byteCharacters.length; i++) {
         byteNumbers[i] = byteCharacters.charCodeAt(i);
@@ -252,14 +423,15 @@ export default function FoldersTab({
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
-      showAlert("Erro de Download", "Falha no download do PDF. Exibindo alternativa de texto.");
+      showAlert("Erro de Download", "Falha no download do PDF: " + (err instanceof Error ? err.message : String(err)));
     }
   };
 
   // View PDF File logic
-  const handleViewFile = (file: FileEntry) => {
+  const handleViewFile = async (file: FileEntry) => {
     try {
-      const byteCharacters = atob(file.content);
+      const content = await getFileContent(file);
+      const byteCharacters = atob(content);
       const byteNumbers = new Array(byteCharacters.length);
       for (let i = 0; i < byteCharacters.length; i++) {
         byteNumbers[i] = byteCharacters.charCodeAt(i);
@@ -271,7 +443,7 @@ export default function FoldersTab({
       setViewingUrl(url);
     } catch (err) {
       console.error(err);
-      showAlert("Erro de Visualização", "Não foi possível carregar a visualização do PDF.");
+      showAlert("Erro de Visualização", "Não foi possível carregar a visualização do PDF: " + (err instanceof Error ? err.message : String(err)));
     }
   };
 
@@ -284,9 +456,10 @@ export default function FoldersTab({
   };
 
   // Print PDF File logic
-  const handlePrintFile = (file: FileEntry) => {
+  const handlePrintFile = async (file: FileEntry) => {
     try {
-      const byteCharacters = atob(file.content);
+      const content = await getFileContent(file);
+      const byteCharacters = atob(content);
       const byteNumbers = new Array(byteCharacters.length);
       for (let i = 0; i < byteCharacters.length; i++) {
         byteNumbers[i] = byteCharacters.charCodeAt(i);
@@ -310,7 +483,7 @@ export default function FoldersTab({
       };
     } catch (err) {
       console.error(err);
-      showAlert("Erro de Impressão", "Falha ao preparar o arquivo para impressão.");
+      showAlert("Erro de Impressão", "Falha ao preparar o arquivo para impressão: " + (err instanceof Error ? err.message : String(err)));
     }
   };
 
@@ -325,6 +498,16 @@ export default function FoldersTab({
       `Tem certeza de que deseja excluir o arquivo "${name}"?`,
       async () => {
         try {
+          // Delete chunks subcollection documents first
+          try {
+            const chunksSnap = await getDocs(collection(db, "arquivos", id, "chunks"));
+            for (const chunkDoc of chunksSnap.docs) {
+              await deleteDoc(doc(db, "arquivos", id, "chunks", chunkDoc.id));
+            }
+          } catch (chunkErr) {
+            console.error("Error deleting file chunks:", chunkErr);
+          }
+
           await deleteDoc(doc(db, "arquivos", id));
           onAddAuditLog(
             "Exclusão de Arquivo",
@@ -354,6 +537,15 @@ export default function FoldersTab({
           const associatedFiles = files.filter(f => f.folderId === folderId);
           for (const file of associatedFiles) {
             if (file.id) {
+              // Delete chunks
+              try {
+                const chunksSnap = await getDocs(collection(db, "arquivos", file.id, "chunks"));
+                for (const chunkDoc of chunksSnap.docs) {
+                  await deleteDoc(doc(db, "arquivos", file.id, "chunks", chunkDoc.id));
+                }
+              } catch (chunkErr) {
+                console.error("Error deleting file chunks in folder delete:", chunkErr);
+              }
               await deleteDoc(doc(db, "arquivos", file.id));
             }
           }
@@ -516,7 +708,16 @@ export default function FoldersTab({
       </div>
 
       {/* Column 2 & 3: Selected folder files panel */}
-      <div className="md:col-span-2 bg-white p-6 border border-[#111111] flex flex-col h-[600px] shadow-none">
+      <div className="md:col-span-2 bg-white p-6 border border-[#111111] flex flex-col h-[600px] shadow-none relative">
+        {isPreparingFile && (
+          <div className="absolute inset-0 bg-white/85 z-50 flex flex-col items-center justify-center space-y-3">
+            <div className="w-8 h-8 border-2 border-dashed border-[#111111] rounded-full animate-spin"></div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[#111111]">
+              {preparingProgress || "Preparando Arquivo..."}
+            </p>
+          </div>
+        )}
+
         {selectedFolder ? (
           !canViewFiles ? (
             <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-4">
@@ -556,8 +757,11 @@ export default function FoldersTab({
                   onDrop={(e) => {
                     e.preventDefault();
                     setDragOver(false);
-                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                      handleFileUpload(e.dataTransfer.files[0]);
+                    if (e.dataTransfer.files) {
+                      const selectedFiles = Array.from(e.dataTransfer.files) as unknown as File[];
+                      if (selectedFiles.length > 0) {
+                        handleMultipleFilesUpload(selectedFiles);
+                      }
                     }
                   }}
                   className={`border-2 border-dashed p-6 text-center transition-all relative rounded-none ${
@@ -569,6 +773,7 @@ export default function FoldersTab({
                   <input
                     type="file"
                     accept="application/pdf"
+                    multiple
                     onChange={handleFileInputChange}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                     disabled={isUploading}
@@ -576,9 +781,11 @@ export default function FoldersTab({
                   <div className="flex flex-col items-center justify-center">
                     <UploadCloud className={`w-8 h-8 mb-2 text-[#111111] ${isUploading ? "animate-bounce" : ""}`} />
                     <p className="text-xs font-bold uppercase tracking-wider text-[#111111]">
-                      {isUploading ? "Enviando arquivo..." : "Clique ou arraste a Pasta de Prestação de Contas (PDF)"}
+                      {isUploading 
+                        ? (uploadProgress || "Enviando arquivo...") 
+                        : "Clique ou arraste um ou mais PDFs de Prestação de Contas"}
                     </p>
-                    <p className="text-[10px] text-gray-500 font-serif italic mt-1">Formatos suportados: Apenas arquivos PDF (Máx: 4MB)</p>
+                    <p className="text-[10px] text-gray-500 font-serif italic mt-1">Formatos suportados: Apenas arquivos PDF (Máx: 15MB por arquivo)</p>
                   </div>
                 </div>
 

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { collection, addDoc, doc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { User, Administradora, Condominium, UserPermissions } from "../types";
-import { Building2, Shield, UserCog, Plus, Trash2, Key, Users, CheckSquare } from "lucide-react";
+import { Building2, Shield, UserCog, Plus, Trash2, Key, Users, CheckSquare, Folder, FolderOpen, ChevronRight, ChevronDown, User as UserIcon } from "lucide-react";
 
 interface AdminPanelProps {
   currentUser: User;
@@ -51,6 +51,22 @@ export default function AdminPanel({
       message,
       isConfirm: false,
     });
+  };
+
+  // View mode and expanded folders for users list
+  const [userViewMode, setUserViewMode] = useState<"table" | "folders">("folders");
+  const [condoViewMode, setCondoViewMode] = useState<"table" | "folders">("folders");
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+
+  const isFolderExpanded = (key: string) => {
+    return expandedFolders[key] !== false; // open by default (true unless explicitly set to false)
+  };
+
+  const toggleFolder = (key: string) => {
+    setExpandedFolders(prev => ({
+      ...prev,
+      [key]: prev[key] === false ? true : false
+    }));
   };
 
   // Forms states
@@ -281,12 +297,18 @@ export default function AdminPanel({
     const finalAdmId = currentUser.role === "SuperADM" ? userAdmId : currentUser.administradoraId;
 
     try {
-      // Check if email already exists
-      const emailExists = usuarios.some(
-        u => u.email.toLowerCase() === userEmail.trim().toLowerCase()
-      );
-      if (emailExists) {
-        showAlert("Erro", "Este e-mail de usuário já está cadastrado!");
+      // Check if duplicate profile already exists
+      const duplicateExists = usuarios.some((u) => {
+        const sameEmail = u.email.toLowerCase() === userEmail.trim().toLowerCase();
+        if (!sameEmail) return false;
+        if (userRole === "Sindico") {
+          return u.role === "Sindico" && u.condominiumIds?.some(cid => userSelectedCondos.includes(cid));
+        } else {
+          return u.role === "Administrador" && u.administradoraId === finalAdmId;
+        }
+      });
+      if (duplicateExists) {
+        showAlert("Erro", "Este e-mail de usuário já está cadastrado com este mesmo vínculo!");
         return;
       }
 
@@ -566,55 +588,220 @@ export default function AdminPanel({
             </form>
           </div>
 
-          <div className="lg:col-span-2 bg-white p-6 border border-[#111111] rounded-none shadow-none">
-            <h3 className="font-serif italic text-xl text-[#111111] mb-6 flex items-center gap-2">
-              <Shield className="w-5 h-5 text-[#111111]" /> Condomínios Cadastrados ({visibleCondos.length})
-            </h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b-2 border-[#111111] text-[#111111] font-bold">
-                    <th className="py-3 px-4 font-serif italic">Nome</th>
-                    <th className="py-3 px-4 font-serif italic">Administradora</th>
-                    <th className="py-3 px-4 font-serif italic">Data Cadastro</th>
-                    <th className="py-3 px-4 font-serif italic text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {visibleCondos.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="py-8 text-center text-gray-400 font-serif italic">
-                        Nenhum condomínio cadastrado para a sua administradora.
-                      </td>
-                    </tr>
-                  ) : (
-                    visibleCondos.map((c) => {
-                      const adm = administradoras.find((a) => a.id === c.administradoraId);
-                      return (
-                        <tr key={c.id} className="hover:bg-gray-50/50 transition-colors">
-                          <td className="py-4 px-4 font-bold text-[#111111]">{c.name}</td>
-                          <td className="py-4 px-4 text-xs font-bold text-gray-700 uppercase tracking-wide">
-                            {adm ? adm.name : "Não vinculada"}
-                          </td>
-                          <td className="py-4 px-4 text-xs text-gray-500 font-mono">
-                            {new Date(c.createdAt).toLocaleDateString("pt-BR")}
-                          </td>
-                          <td className="py-4 px-4 text-right">
-                            <button
-                              onClick={() => handleDeleteCondo(c.id, c.name)}
-                              className="text-red-700 hover:text-red-950 p-1.5 border border-transparent hover:border-red-200 transition-colors"
-                              title="Excluir"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+          <div className="lg:col-span-2 bg-white p-6 border border-[#111111] rounded-none shadow-none flex flex-col">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-4 border-b border-[#111111]/10">
+              <h3 className="font-serif italic text-xl text-[#111111] flex items-center gap-2">
+                <Shield className="w-5 h-5 text-[#111111]" /> Condomínios Cadastrados ({visibleCondos.length})
+              </h3>
+              <div className="flex border border-[#111111] text-[10px] uppercase font-bold tracking-wider">
+                <button
+                  type="button"
+                  onClick={() => setCondoViewMode("folders")}
+                  className={`px-3 py-1.5 transition-colors cursor-pointer ${
+                    condoViewMode === "folders"
+                      ? "bg-[#111111] text-white border-r border-[#111111]"
+                      : "bg-white text-[#111111] hover:bg-gray-100 border-r border-[#111111]"
+                  }`}
+                >
+                  Pastas
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCondoViewMode("table")}
+                  className={`px-3 py-1.5 transition-colors cursor-pointer ${
+                    condoViewMode === "table"
+                      ? "bg-[#111111] text-white"
+                      : "bg-white text-[#111111] hover:bg-gray-100"
+                  }`}
+                >
+                  Tabela
+                </button>
+              </div>
             </div>
+
+            {condoViewMode === "table" ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b-2 border-[#111111] text-[#111111] font-bold">
+                      <th className="py-3 px-4 font-serif italic">Nome</th>
+                      <th className="py-3 px-4 font-serif italic">Administradora</th>
+                      <th className="py-3 px-4 font-serif italic">Data Cadastro</th>
+                      <th className="py-3 px-4 font-serif italic text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {visibleCondos.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="py-8 text-center text-gray-400 font-serif italic">
+                          Nenhum condomínio cadastrado para a sua administradora.
+                        </td>
+                      </tr>
+                    ) : (
+                      visibleCondos.map((c) => {
+                        const adm = administradoras.find((a) => a.id === c.administradoraId);
+                        return (
+                          <tr key={c.id} className="hover:bg-gray-50/50 transition-colors">
+                            <td className="py-4 px-4 font-bold text-[#111111]">{c.name}</td>
+                            <td className="py-4 px-4 text-xs font-bold text-gray-700 uppercase tracking-wide">
+                              {adm ? adm.name : "Não vinculada"}
+                            </td>
+                            <td className="py-4 px-4 text-xs text-gray-500 font-mono">
+                              {new Date(c.createdAt).toLocaleDateString("pt-BR")}
+                            </td>
+                            <td className="py-4 px-4 text-right">
+                              <button
+                                onClick={() => handleDeleteCondo(c.id, c.name)}
+                                className="text-red-700 hover:text-red-950 p-1.5 border border-transparent hover:border-gray-200 transition-colors cursor-pointer"
+                                title="Excluir"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {administradoras
+                  .filter(adm => currentUser.role === "SuperADM" || adm.id === currentUser.administradoraId)
+                  .map(adm => {
+                    const folderKey = `condo-adm-${adm.id}`;
+                    const isExpanded = isFolderExpanded(folderKey);
+                    
+                    // Condos belonging to this adm
+                    const admCondos = visibleCondos.filter(c => c.administradoraId === adm.id);
+                    
+                    return (
+                      <div key={adm.id} className="border border-[#111111] bg-[#FAF9F6] p-4">
+                        <div 
+                          onClick={() => toggleFolder(folderKey)}
+                          className="flex items-center justify-between cursor-pointer hover:opacity-85 transition-opacity select-none p-1 -m-1"
+                        >
+                          <div className="flex items-center gap-2">
+                            {isExpanded ? (
+                              <ChevronDown className="w-4 h-4 text-[#123E33]" />
+                            ) : (
+                              <ChevronRight className="w-4 h-4 text-[#123E33]" />
+                            )}
+                            <FolderOpen className="w-5 h-5 text-[#123E33] fill-current opacity-20" />
+                            <span className="font-serif italic font-bold text-sm text-[#111111]">
+                              🏢 {adm.name} ({admCondos.length} {admCondos.length === 1 ? "Condomínio" : "Condomínios"})
+                            </span>
+                          </div>
+                          <span className="text-[9px] text-gray-500 font-mono">
+                            {isExpanded ? "Encolher" : "Expandir"}
+                          </span>
+                        </div>
+                        
+                        {isExpanded && (
+                          <div className="mt-4 pl-5 space-y-2 border-l border-dashed border-[#111111]/20">
+                            {admCondos.length === 0 ? (
+                              <p className="text-[11px] text-gray-400 font-serif italic py-1">
+                                Nenhum condomínio cadastrado para esta administradora.
+                              </p>
+                            ) : (
+                              admCondos.map(c => {
+                                // Find any síndicos linked to this condo
+                                const sindicos = usuarios.filter(
+                                  u => u.role === "Sindico" && u.condominiumIds?.includes(c.id)
+                                );
+                                
+                                return (
+                                  <div key={c.id} className="bg-white p-3 border border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 hover:shadow-xs transition-all">
+                                    <div className="space-y-1">
+                                      <div className="font-bold text-xs text-[#111111]">
+                                        🏢 {c.name}
+                                      </div>
+                                      <div className="text-[10px] text-gray-500 font-mono flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                        <span>Data: {new Date(c.createdAt).toLocaleDateString("pt-BR")}</span>
+                                        <span className="text-gray-300">|</span>
+                                        <span>
+                                          Síndicos: {sindicos.length === 0 ? (
+                                            <span className="text-red-500 font-serif italic text-[9px] uppercase tracking-wider font-bold">[Nenhum síndico]</span>
+                                          ) : (
+                                            sindicos.map(s => s.name).join(", ")
+                                          )}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <button
+                                        onClick={() => handleDeleteCondo(c.id, c.name)}
+                                        className="p-1.5 border border-gray-200 hover:border-red-400 text-gray-600 hover:text-red-700 hover:bg-red-50 cursor-pointer transition-all"
+                                        title="Excluir Condomínio"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  
+                {/* Condominios without Administradora (orphans) */}
+                {currentUser.role === "SuperADM" && visibleCondos.filter(c => !c.administradoraId).length > 0 && (
+                  <div className="border border-red-200 bg-red-50/10 p-4">
+                    <div 
+                      onClick={() => toggleFolder("unlinked_condos")}
+                      className="flex items-center justify-between cursor-pointer select-none"
+                    >
+                      <div className="flex items-center gap-2">
+                        {isFolderExpanded("unlinked_condos") ? (
+                          <ChevronDown className="w-4 h-4 text-red-700" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-red-700" />
+                        )}
+                        <FolderOpen className="w-5 h-5 text-red-700 fill-current opacity-10" />
+                        <span className="font-serif italic font-bold text-sm text-red-800">
+                          ⚠️ Condomínios sem Vínculo de Administradora ({visibleCondos.filter(c => !c.administradoraId).length})
+                        </span>
+                      </div>
+                    </div>
+
+                    {isFolderExpanded("unlinked_condos") && (
+                      <div className="mt-4 pl-5 space-y-2 border-l border-dashed border-red-300">
+                        {visibleCondos.filter(c => !c.administradoraId).map(c => {
+                          const sindicos = usuarios.filter(
+                            u => u.role === "Sindico" && u.condominiumIds?.includes(c.id)
+                          );
+                          return (
+                            <div key={c.id} className="bg-white p-3 border border-red-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 hover:shadow-xs transition-all">
+                              <div className="space-y-1">
+                                <div className="font-bold text-xs text-red-950">
+                                  🏢 {c.name}
+                                </div>
+                                <div className="text-[10px] text-gray-500 font-mono">
+                                  Data: {new Date(c.createdAt).toLocaleDateString("pt-BR")} | Síndicos: {sindicos.length === 0 ? "Nenhum" : sindicos.map(s => s.name).join(", ")}
+                                </div>
+                              </div>
+                              <div>
+                                <button
+                                  onClick={() => handleDeleteCondo(c.id, c.name)}
+                                  className="p-1.5 border border-gray-200 hover:border-red-400 text-gray-600 hover:text-red-700 hover:bg-red-50 cursor-pointer transition-all"
+                                  title="Excluir"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -984,120 +1171,481 @@ export default function AdminPanel({
             </div>
           </div>
 
-          <div className="lg:col-span-2 bg-white p-6 border border-[#111111] rounded-none shadow-none">
-            <h3 className="font-serif italic text-xl text-[#111111] mb-6 flex items-center gap-2">
-              <Users className="w-5 h-5 text-[#111111]" /> Usuários Cadastrados ({visibleUsers.length})
-            </h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b-2 border-[#111111] text-[#111111] font-bold">
-                    <th className="py-3 px-4 font-serif italic">Nome / Administradora</th>
-                    <th className="py-3 px-4 font-serif italic">E-mail (Acesso)</th>
-                    <th className="py-3 px-4 font-serif italic">Permissão</th>
-                    <th className="py-3 px-4 font-serif italic">Condomínios Autorizados</th>
-                    <th className="py-3 px-4 font-serif italic text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {visibleUsers.map((u) => {
-                    const linkedCondos = condominios.filter((c) =>
-                      u.condominiumIds?.includes(c.id)
-                    );
-                    return (
-                      <tr key={u.id} className="hover:bg-gray-50/50 transition-colors">
-                        <td className="py-4 px-4">
-                          <div className="font-bold text-[#111111]">{u.name}</div>
-                          {u.administradoraId && (
-                            <div className="text-[9px] text-[#C2A87E] font-bold uppercase tracking-wider mt-0.5">
-                              {administradoras.find((a) => a.id === u.administradoraId)?.name || "Administradora"}
+          <div className="lg:col-span-2 bg-white p-6 border border-[#111111] rounded-none shadow-none flex flex-col">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-4 border-b border-[#111111]/10">
+              <h3 className="font-serif italic text-xl text-[#111111] flex items-center gap-2">
+                <Users className="w-5 h-5 text-[#111111]" /> Usuários Cadastrados ({visibleUsers.length})
+              </h3>
+              <div className="flex border border-[#111111] text-[10px] uppercase font-bold tracking-wider">
+                <button
+                  type="button"
+                  onClick={() => setUserViewMode("folders")}
+                  className={`px-3 py-1.5 transition-colors cursor-pointer ${
+                    userViewMode === "folders"
+                      ? "bg-[#111111] text-white border-r border-[#111111]"
+                      : "bg-white text-[#111111] hover:bg-gray-100 border-r border-[#111111]"
+                  }`}
+                >
+                  Pastas
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUserViewMode("table")}
+                  className={`px-3 py-1.5 transition-colors cursor-pointer ${
+                    userViewMode === "table"
+                      ? "bg-[#111111] text-white"
+                      : "bg-white text-[#111111] hover:bg-gray-100"
+                  }`}
+                >
+                  Tabela
+                </button>
+              </div>
+            </div>
+
+            {userViewMode === "table" ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b-2 border-[#111111] text-[#111111] font-bold">
+                      <th className="py-3 px-4 font-serif italic">Nome / Administradora</th>
+                      <th className="py-3 px-4 font-serif italic">E-mail (Acesso)</th>
+                      <th className="py-3 px-4 font-serif italic">Permissão</th>
+                      <th className="py-3 px-4 font-serif italic">Condomínios Autorizados</th>
+                      <th className="py-3 px-4 font-serif italic text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {visibleUsers.map((u) => {
+                      const linkedCondos = condominios.filter((c) =>
+                        u.condominiumIds?.includes(c.id)
+                      );
+                      return (
+                        <tr key={u.id} className="hover:bg-gray-50/50 transition-colors">
+                          <td className="py-4 px-4">
+                            <div className="font-bold text-[#111111]">{u.name}</div>
+                            {u.administradoraId && (
+                              <div className="text-[9px] text-[#C2A87E] font-bold uppercase tracking-wider mt-0.5">
+                                {administradoras.find((a) => a.id === u.administradoraId)?.name || "Administradora"}
+                              </div>
+                            )}
+                            <div className="flex flex-wrap items-center gap-2 mt-2">
+                              <button
+                                onClick={() => handleStartEditUser(u)}
+                                className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest bg-stone-100 hover:bg-[#C2A87E] text-[#111111] hover:text-white border border-[#111111]/20 hover:border-[#C2A87E] px-2 py-1 transition-all cursor-pointer rounded-none"
+                                title="Editar Permissões e Dados"
+                              >
+                                <UserCog className="w-3 h-3" /> Editar
+                              </button>
+                              {u.id !== currentUser.id && (
+                                <button
+                                  onClick={() => handleDeleteUser(u.id, u.name, u.email)}
+                                  className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest bg-white hover:bg-red-50 text-red-700 hover:text-red-900 border border-red-200 hover:border-red-400 px-2 py-1 transition-all cursor-pointer rounded-none"
+                                  title="Excluir Usuário"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" /> Excluir
+                                </button>
+                              )}
                             </div>
-                          )}
-                          <div className="flex flex-wrap items-center gap-2 mt-2">
+                          </td>
+                          <td className="py-4 px-4 text-xs text-gray-700">
+                            <div className="font-mono">{u.email}</div>
+                            <div className="text-[10px] text-gray-400 font-mono mt-1 flex items-center gap-1">
+                              <Key className="w-3 h-3 text-gray-400" /> Senha: {u.password}
+                            </div>
+                          </td>
+                          <td className="py-4 px-4">
+                            <span
+                              className={`px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider border ${
+                                u.role === "SuperADM"
+                                  ? "bg-red-50 text-red-700 border-red-200"
+                                  : u.role === "Administrador"
+                                  ? "bg-blue-50 text-blue-700 border-blue-200"
+                                  : "bg-green-50 text-green-700 border-green-200"
+                              }`}
+                            >
+                              {u.role === "SuperADM"
+                                ? "Super ADM"
+                                : u.role === "Administrador"
+                                ? "Administradora"
+                                : "Síndico"}
+                            </span>
+                          </td>
+                          <td className="py-4 px-4 text-xs text-gray-600">
+                            {u.role === "SuperADM" ? (
+                              <span className="text-gray-400 font-serif italic">Acesso Total (SuperADM)</span>
+                            ) : u.role === "Administrador" ? (
+                              <span className="text-gray-400 font-serif italic">Todos da Administradora</span>
+                            ) : linkedCondos.length === 0 ? (
+                              <span className="text-red-600 font-bold tracking-wide uppercase text-[10px]">[Nenhum condomínio]</span>
+                            ) : (
+                              <div className="flex flex-wrap gap-1.5 max-w-xs">
+                                {linkedCondos.map((lc) => (
+                                  <span
+                                    key={lc.id}
+                                    className="bg-[#F4F2EE] text-[#111111] border border-gray-300 text-[9px] font-mono px-2 py-0.5 uppercase"
+                                  >
+                                    {lc.name}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-4 px-4 text-right">
                             <button
                               onClick={() => handleStartEditUser(u)}
-                              className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest bg-stone-100 hover:bg-[#C2A87E] text-[#111111] hover:text-white border border-[#111111]/20 hover:border-[#C2A87E] px-2 py-1 transition-all cursor-pointer rounded-none"
+                              className="text-[#111111] hover:text-[#C2A87E] p-1.5 border border-transparent hover:border-gray-200 transition-colors mr-2 cursor-pointer"
                               title="Editar Permissões e Dados"
                             >
-                              <UserCog className="w-3 h-3" /> Editar
+                              <UserCog className="w-4 h-4" />
                             </button>
-                            {u.id !== currentUser.id && (
-                              <button
-                                onClick={() => handleDeleteUser(u.id, u.name, u.email)}
-                                className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-widest bg-white hover:bg-red-50 text-red-700 hover:text-red-900 border border-red-200 hover:border-red-400 px-2 py-1 transition-all cursor-pointer rounded-none"
-                                title="Excluir Usuário"
-                              >
-                                <Trash2 className="w-3 h-3" /> Excluir
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-4 px-4 text-xs text-gray-700">
-                          <div className="font-mono">{u.email}</div>
-                          <div className="text-[10px] text-gray-400 font-mono mt-1 flex items-center gap-1">
-                            <Key className="w-3 h-3 text-gray-400" /> Senha: {u.password}
-                          </div>
-                        </td>
-                        <td className="py-4 px-4">
-                          <span
-                            className={`px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider border ${
-                              u.role === "SuperADM"
-                                ? "bg-red-50 text-red-700 border-red-200"
-                                : u.role === "Administrador"
-                                ? "bg-blue-50 text-blue-700 border-blue-200"
-                                : "bg-green-50 text-green-700 border-green-200"
-                            }`}
-                          >
-                            {u.role === "SuperADM"
-                              ? "Super ADM"
-                              : u.role === "Administrador"
-                              ? "Administradora"
-                              : "Síndico"}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4 text-xs text-gray-600">
-                          {u.role === "SuperADM" ? (
-                            <span className="text-gray-400 font-serif italic">Acesso Total (SuperADM)</span>
-                          ) : u.role === "Administrador" ? (
-                            <span className="text-gray-400 font-serif italic">Todos da Administradora</span>
-                          ) : linkedCondos.length === 0 ? (
-                            <span className="text-red-600 font-bold tracking-wide uppercase text-[10px]">[Nenhum condomínio]</span>
-                          ) : (
-                            <div className="flex flex-wrap gap-1.5 max-w-xs">
-                              {linkedCondos.map((lc) => (
-                                <span
-                                  key={lc.id}
-                                  className="bg-[#F4F2EE] text-[#111111] border border-gray-300 text-[9px] font-mono px-2 py-0.5 uppercase"
-                                >
-                                  {lc.name}
-                                </span>
-                              ))}
+                            <button
+                              onClick={() => handleDeleteUser(u.id, u.name, u.email)}
+                              className="text-red-700 hover:text-red-950 p-1.5 border border-transparent hover:border-red-200 transition-colors cursor-pointer"
+                              disabled={u.id === currentUser.id}
+                              title={u.id === currentUser.id ? "Você não pode se excluir" : "Excluir"}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Super ADM Folder */}
+                {currentUser.role === "SuperADM" && (
+                  <div className="border border-[#111111] bg-[#FAF9F6] p-4">
+                    <div 
+                      onClick={() => toggleFolder("super_adm")}
+                      className="flex items-center justify-between cursor-pointer hover:opacity-85 transition-opacity select-none"
+                    >
+                      <div className="flex items-center gap-2">
+                        {isFolderExpanded("super_adm") ? (
+                          <ChevronDown className="w-4 h-4 text-[#123E33]" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-[#123E33]" />
+                        )}
+                        <FolderOpen className="w-5 h-5 text-[#123E33] fill-current opacity-20" />
+                        <span className="font-serif italic font-bold text-sm text-[#111111] flex items-center gap-2">
+                          👑 Super Administradores do Portal ({usuarios.filter(u => u.role === "SuperADM").length})
+                        </span>
+                      </div>
+                      <span className="text-[9px] text-gray-500 font-mono">
+                        {isFolderExpanded("super_adm") ? "Encolher" : "Expandir"}
+                      </span>
+                    </div>
+                    
+                    {isFolderExpanded("super_adm") && (
+                      <div className="mt-4 pl-5 space-y-2 border-l border-dashed border-[#111111]/20">
+                        {usuarios.filter(u => u.role === "SuperADM").map(u => (
+                          <div key={u.id} className="bg-white p-3 border border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 hover:shadow-xs transition-all">
+                            <div className="space-y-1">
+                              <div className="font-bold text-xs text-[#111111] flex items-center gap-1.5">
+                                <UserIcon className="w-3.5 h-3.5 text-gray-400" />
+                                {u.name} {u.id === currentUser.id && <span className="text-[8px] font-mono font-bold bg-[#123E33] text-white px-1.5 py-0.2 ml-1">[VOCÊ]</span>}
+                              </div>
+                              <div className="text-[10px] text-gray-500 font-mono flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                <span>{u.email}</span>
+                                <span className="text-gray-300">|</span>
+                                <span>Senha: {u.password}</span>
+                              </div>
                             </div>
-                          )}
-                        </td>
-                        <td className="py-4 px-4 text-right">
-                          <button
-                            onClick={() => handleStartEditUser(u)}
-                            className="text-[#111111] hover:text-[#C2A87E] p-1.5 border border-transparent hover:border-gray-200 transition-colors mr-2 cursor-pointer"
-                            title="Editar Permissões e Dados"
-                          >
-                            <UserCog className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteUser(u.id, u.name, u.email)}
-                            className="text-red-700 hover:text-red-950 p-1.5 border border-transparent hover:border-red-200 transition-colors cursor-pointer"
-                            disabled={u.id === currentUser.id}
-                            title={u.id === currentUser.id ? "Você não pode se excluir" : "Excluir"}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </td>
-                      </tr>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => handleStartEditUser(u)}
+                                className="p-1.5 border border-gray-200 hover:border-[#C2A87E] text-gray-600 hover:text-[#C2A87E] hover:bg-stone-50 cursor-pointer"
+                                title="Editar Permissões e Dados"
+                              >
+                                <UserCog className="w-4 h-4" />
+                              </button>
+                              {u.id !== currentUser.id && (
+                                <button
+                                  onClick={() => handleDeleteUser(u.id, u.name, u.email)}
+                                  className="p-1.5 border border-gray-200 hover:border-red-400 text-gray-600 hover:text-red-700 hover:bg-red-50 cursor-pointer"
+                                  title="Excluir Usuário"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Administradoras Loops */}
+                {administradoras
+                  .filter(adm => currentUser.role === "SuperADM" || adm.id === currentUser.administradoraId)
+                  .map(adm => {
+                    const admIdKey = `adm-${adm.id}`;
+                    const isAdmExpanded = isFolderExpanded(admIdKey);
+                    const staffKey = `adm-${adm.id}-staff`;
+                    const isStaffExpanded = isFolderExpanded(staffKey);
+                    const condosKey = `adm-${adm.id}-condos`;
+                    const isCondosExpanded = isFolderExpanded(condosKey);
+
+                    // Staff users (Administradores) linked to this adm
+                    const staffUsers = usuarios.filter(u => u.role === "Administrador" && u.administradoraId === adm.id);
+                    // Condos linked to this adm
+                    const admCondos = condominios.filter(c => c.administradoraId === adm.id);
+
+                    return (
+                      <div key={adm.id} className="border border-[#111111] bg-[#FAF9F6] p-4 space-y-3">
+                        {/* Administradora Header */}
+                        <div 
+                          onClick={() => toggleFolder(admIdKey)}
+                          className="flex items-center justify-between cursor-pointer hover:opacity-85 transition-opacity select-none p-1 -m-1"
+                        >
+                          <div className="flex items-center gap-2">
+                            {isAdmExpanded ? (
+                              <ChevronDown className="w-4 h-4 text-[#123E33]" />
+                            ) : (
+                              <ChevronRight className="w-4 h-4 text-[#123E33]" />
+                            )}
+                            <FolderOpen className="w-5 h-5 text-[#123E33] fill-current opacity-20" />
+                            <span className="font-serif italic font-bold text-base text-[#111111]">
+                              🏢 Administradora / Gestão: {adm.name}
+                            </span>
+                          </div>
+                          <span className="text-[10px] bg-[#EEF2F0] text-[#123E33] px-2 py-0.5 font-bold uppercase tracking-wider">
+                            {admCondos.length} {admCondos.length === 1 ? "Condomínio" : "Condomínios"}
+                          </span>
+                        </div>
+
+                        {isAdmExpanded && (
+                          <div className="pl-5 space-y-3 border-l border-dashed border-[#111111]/20 pt-2">
+                            {/* STAFF (Administradores) */}
+                            <div className="border border-gray-200 bg-white p-3">
+                              <div 
+                                onClick={() => toggleFolder(staffKey)}
+                                className="flex items-center justify-between cursor-pointer select-none hover:opacity-85"
+                              >
+                                <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-gray-700">
+                                  {isStaffExpanded ? (
+                                    <ChevronDown className="w-3.5 h-3.5 text-[#C2A87E]" />
+                                  ) : (
+                                    <ChevronRight className="w-3.5 h-3.5 text-[#C2A87E]" />
+                                  )}
+                                  <FolderOpen className="w-4 h-4 text-[#C2A87E] fill-current opacity-25" />
+                                  <span>Equipe do Escritório ({staffUsers.length})</span>
+                                </div>
+                                <span className="text-[9px] text-gray-400">
+                                  {isStaffExpanded ? "Ocultar" : "Mostrar"}
+                                </span>
+                              </div>
+
+                              {isStaffExpanded && (
+                                <div className="mt-3 pl-4 space-y-2 border-l border-dotted border-gray-300">
+                                  {staffUsers.length === 0 ? (
+                                    <p className="text-[11px] text-gray-400 font-serif italic py-1">Nenhum administrador cadastrado nesta administradora.</p>
+                                  ) : (
+                                    staffUsers.map(u => (
+                                      <div key={u.id} className="bg-stone-50/50 p-2.5 border border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 hover:shadow-xs transition-all">
+                                        <div className="space-y-1">
+                                          <div className="font-bold text-xs text-[#111111] flex items-center gap-1.5">
+                                            <UserIcon className="w-3.5 h-3.5 text-gray-400" />
+                                            {u.name}
+                                          </div>
+                                          <div className="text-[10px] text-gray-500 font-mono flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                            <span>{u.email}</span>
+                                            <span className="text-gray-300">|</span>
+                                            <span>Senha: {u.password}</span>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-1.5">
+                                          <button
+                                            onClick={() => handleStartEditUser(u)}
+                                            className="p-1 border border-gray-200 hover:border-[#C2A87E] text-gray-600 hover:text-[#C2A87E] hover:bg-white cursor-pointer"
+                                            title="Editar"
+                                          >
+                                            <UserCog className="w-3.5 h-3.5" />
+                                          </button>
+                                          {u.id !== currentUser.id && (
+                                            <button
+                                              onClick={() => handleDeleteUser(u.id, u.name, u.email)}
+                                              className="p-1 border border-gray-200 hover:border-red-400 text-gray-600 hover:text-red-700 hover:bg-red-50 cursor-pointer"
+                                              title="Excluir"
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* CONDOMINIOS */}
+                            <div className="border border-gray-200 bg-white p-3 space-y-3">
+                              <div 
+                                onClick={() => toggleFolder(condosKey)}
+                                className="flex items-center justify-between cursor-pointer select-none hover:opacity-85"
+                              >
+                                <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-gray-700">
+                                  {isCondosExpanded ? (
+                                    <ChevronDown className="w-3.5 h-3.5 text-[#123E33]" />
+                                  ) : (
+                                    <ChevronRight className="w-3.5 h-3.5 text-[#123E33]" />
+                                  )}
+                                  <FolderOpen className="w-4 h-4 text-[#123E33] fill-current opacity-25" />
+                                  <span>Condomínios ({admCondos.length})</span>
+                                </div>
+                                <span className="text-[9px] text-gray-400">
+                                  {isCondosExpanded ? "Ocultar" : "Mostrar"}
+                                </span>
+                              </div>
+
+                              {isCondosExpanded && (
+                                <div className="pl-4 space-y-3 border-l border-dotted border-gray-300">
+                                  {admCondos.length === 0 ? (
+                                    <p className="text-[11px] text-gray-400 font-serif italic py-1">Nenhum condomínio vinculado a esta administradora.</p>
+                                  ) : (
+                                    admCondos.map(condo => {
+                                      const condoIdKey = `condo-${condo.id}`;
+                                      const isCondoExpanded = isFolderExpanded(condoIdKey);
+
+                                      // Síndicos for this condo
+                                      const sindicos = usuarios.filter(
+                                        u => u.role === "Sindico" && u.condominiumIds?.includes(condo.id)
+                                      );
+
+                                      return (
+                                        <div key={condo.id} className="border border-gray-150 bg-stone-50/30 p-3 space-y-2">
+                                          {/* Condo Header */}
+                                          <div 
+                                            onClick={() => toggleFolder(condoIdKey)}
+                                            className="flex items-center justify-between cursor-pointer hover:opacity-85 transition-opacity select-none p-0.5"
+                                          >
+                                            <div className="flex items-center gap-2 text-xs font-bold text-[#111111]">
+                                              {isCondoExpanded ? (
+                                                <ChevronDown className="w-3 text-gray-500" />
+                                              ) : (
+                                                <ChevronRight className="w-3 text-gray-500" />
+                                              )}
+                                              <FolderOpen className="w-4 h-4 text-[#C2A87E] fill-current opacity-30" />
+                                              <span>🏢 Condomínio: {condo.name}</span>
+                                            </div>
+                                            <span className="text-[8px] font-mono text-gray-500 font-bold bg-white border border-gray-200 px-1.5 py-0.2">
+                                              {sindicos.length} {sindicos.length === 1 ? "Síndico" : "Síndicos"}
+                                            </span>
+                                          </div>
+
+                                          {isCondoExpanded && (
+                                            <div className="mt-2 pl-4 space-y-2 border-l border-dashed border-gray-300">
+                                              {sindicos.length === 0 ? (
+                                                <p className="text-[10px] text-red-500 font-serif italic py-1">[Nenhum síndico vinculado a este condomínio]</p>
+                                              ) : (
+                                                sindicos.map(u => (
+                                                  <div key={u.id} className="bg-white p-2.5 border border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 hover:shadow-xs transition-all">
+                                                    <div className="space-y-1">
+                                                      <div className="font-bold text-xs text-[#111111] flex items-center gap-1.5">
+                                                        <UserIcon className="w-3.5 h-3.5 text-[#C2A87E]" />
+                                                        {u.name} <span className="text-[8px] bg-green-50 text-green-700 border border-green-100 px-1.5 py-0.2 font-bold uppercase">SÍNDICO</span>
+                                                      </div>
+                                                      <div className="text-[10px] text-gray-500 font-mono flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                                        <span>{u.email}</span>
+                                                        <span className="text-gray-300">|</span>
+                                                        <span>Senha: {u.password}</span>
+                                                      </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-1.5">
+                                                      <button
+                                                        onClick={() => handleStartEditUser(u)}
+                                                        className="p-1 border border-gray-200 hover:border-[#C2A87E] text-gray-600 hover:text-[#C2A87E] hover:bg-stone-50 cursor-pointer"
+                                                        title="Editar Permissões e Dados"
+                                                      >
+                                                        <UserCog className="w-3.5 h-3.5" />
+                                                      </button>
+                                                      <button
+                                                        onClick={() => handleDeleteUser(u.id, u.name, u.email)}
+                                                        className="p-1 border border-gray-200 hover:border-red-400 text-gray-600 hover:text-red-700 hover:bg-red-50 cursor-pointer"
+                                                        title="Excluir"
+                                                      >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                      </button>
+                                                    </div>
+                                                  </div>
+                                                ))
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+
+                {/* Fallback for Users without Administradora (orphans) */}
+                {currentUser.role === "SuperADM" && usuarios.filter(u => u.role !== "SuperADM" && !u.administradoraId).length > 0 && (
+                  <div className="border border-red-200 bg-red-50/10 p-4">
+                    <div 
+                      onClick={() => toggleFolder("unlinked_users")}
+                      className="flex items-center justify-between cursor-pointer select-none"
+                    >
+                      <div className="flex items-center gap-2">
+                        {isFolderExpanded("unlinked_users") ? (
+                          <ChevronDown className="w-4 h-4 text-red-700" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-red-700" />
+                        )}
+                        <FolderOpen className="w-5 h-5 text-red-700 fill-current opacity-10" />
+                        <span className="font-serif italic font-bold text-sm text-red-800">
+                          ⚠️ Usuários sem Vínculo de Administradora ({usuarios.filter(u => u.role !== "SuperADM" && !u.administradoraId).length})
+                        </span>
+                      </div>
+                    </div>
+
+                    {isFolderExpanded("unlinked_users") && (
+                      <div className="mt-4 pl-5 space-y-2 border-l border-dashed border-red-300">
+                        {usuarios.filter(u => u.role !== "SuperADM" && !u.administradoraId).map(u => (
+                          <div key={u.id} className="bg-white p-3 border border-red-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 hover:shadow-xs transition-all">
+                            <div className="space-y-1">
+                              <div className="font-bold text-xs text-red-950 flex items-center gap-1.5">
+                                <UserIcon className="w-3.5 h-3.5 text-gray-400" />
+                                {u.name} <span className="text-[8px] bg-red-100 text-red-800 px-1.5 py-0.2">{u.role}</span>
+                              </div>
+                              <div className="text-[10px] text-gray-500 font-mono">
+                                {u.email} | Senha: {u.password}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => handleStartEditUser(u)}
+                                className="p-1 border border-gray-200 hover:border-[#C2A87E] text-gray-600 hover:text-[#C2A87E] hover:bg-stone-50 cursor-pointer"
+                                title="Editar"
+                              >
+                                <UserCog className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteUser(u.id, u.name, u.email)}
+                                className="p-1 border border-gray-200 hover:border-red-400 text-gray-600 hover:text-red-700 hover:bg-red-50 cursor-pointer"
+                                title="Excluir"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

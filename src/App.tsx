@@ -21,7 +21,9 @@ import {
   X,
   PlusCircle,
   FileCheck2,
-  Users
+  Users,
+  Palette,
+  Home
 } from "lucide-react";
 
 export default function App() {
@@ -33,6 +35,7 @@ export default function App() {
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [loginMatches, setLoginMatches] = useState<User[]>([]);
 
   // Registration states
   const [isRegistering, setIsRegistering] = useState(false);
@@ -70,6 +73,22 @@ export default function App() {
   const [isSeeding, setIsSeeding] = useState(true);
   const [dbError, setDbError] = useState<string>("");
 
+  // Theme state: 'emerald' | 'dark' | 'burgundy'
+  const [theme, setTheme] = useState<"emerald" | "dark" | "burgundy">(() => {
+    const saved = localStorage.getItem("portal_theme");
+    return (saved as "emerald" | "dark" | "burgundy") || "emerald";
+  });
+
+  // Apply theme to body
+  useEffect(() => {
+    localStorage.setItem("portal_theme", theme);
+    const body = document.body;
+    body.classList.remove("theme-dark", "theme-burgundy");
+    if (theme !== "emerald") {
+      body.classList.add(`theme-${theme}`);
+    }
+  }, [theme]);
+
   // Registration handler
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,11 +100,17 @@ export default function App() {
       return;
     }
 
-    const emailExists = usuarios.some(
-      (u) => u.email.toLowerCase() === regEmail.trim().toLowerCase()
-    );
-    if (emailExists) {
-      setRegError("Este e-mail já está cadastrado no portal.");
+    const duplicateProfileExists = usuarios.some((u) => {
+      const sameEmail = u.email.toLowerCase() === regEmail.trim().toLowerCase();
+      if (!sameEmail) return false;
+      if (regRole === "Sindico") {
+        return u.role === "Sindico" && u.condominiumIds?.includes(regCondoId);
+      } else {
+        return u.role === "Administrador" && u.administradoraId === regAdmId;
+      }
+    });
+    if (duplicateProfileExists) {
+      setRegError("Este e-mail já está cadastrado com este mesmo vínculo (condomínio/administradora)!");
       return;
     }
 
@@ -344,42 +369,50 @@ export default function App() {
     e.preventDefault();
     setLoginError("");
 
-    const matchedUser = usuarios.find(
+    const sameEmailUsers = usuarios.filter(
       (u) => u.email.toLowerCase() === loginEmail.trim().toLowerCase()
     );
 
-    if (!matchedUser) {
+    if (sameEmailUsers.length === 0) {
       setLoginError("E-mail não cadastrado no portal.");
       return;
     }
 
-    if (matchedUser.password !== loginPassword) {
+    const passwordMatches = sameEmailUsers.filter(u => u.password === loginPassword);
+    if (passwordMatches.length === 0) {
       setLoginError("Senha incorreta. Tente novamente.");
       return;
     }
 
-    // Success
-    setCurrentUser(matchedUser);
-    localStorage.setItem("portal_user", JSON.stringify(matchedUser));
-    setLoginEmail("");
-    setLoginPassword("");
+    if (passwordMatches.length === 1) {
+      const matchedUser = passwordMatches[0];
+      // Success
+      setCurrentUser(matchedUser);
+      localStorage.setItem("portal_user", JSON.stringify(matchedUser));
+      setLoginEmail("");
+      setLoginPassword("");
+      setLoginMatches([]);
 
-    // Set default selected condominium if they are Síndico and have exactly 1 condo
-    if (matchedUser.role === "Sindico" && matchedUser.condominiumIds && matchedUser.condominiumIds.length === 1) {
-      setSelectedCondominiumId(matchedUser.condominiumIds[0]);
+      // Set default selected condominium if they are Síndico and have exactly 1 condo
+      if (matchedUser.role === "Sindico" && matchedUser.condominiumIds && matchedUser.condominiumIds.length === 1) {
+        setSelectedCondominiumId(matchedUser.condominiumIds[0]);
+      } else {
+        setSelectedCondominiumId(null);
+      }
+
+      // Register login event
+      addDoc(collection(db, "auditoria"), {
+        userId: matchedUser.id,
+        userName: matchedUser.name,
+        userRole: matchedUser.role,
+        action: "Login",
+        details: "Acessou o portal de prestação de contas",
+        createdAt: new Date().toISOString(),
+      });
     } else {
-      setSelectedCondominiumId(null);
+      // More than 1 profile matches email and password
+      setLoginMatches(passwordMatches);
     }
-
-    // Register login event
-    addDoc(collection(db, "auditoria"), {
-      userId: matchedUser.id,
-      userName: matchedUser.name,
-      userRole: matchedUser.role,
-      action: "Login",
-      details: "Acessou o portal de prestação de contas",
-      createdAt: new Date().toISOString(),
-    });
   };
 
   // Logout handler
@@ -430,7 +463,7 @@ export default function App() {
 
   if (isSeeding) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#FAF9F6] border-8 border-[#123E33]">
+      <div className="min-h-screen flex items-center justify-center bg-[#FAF9F6] border-4 md:border-8 border-[#123E33]">
         <div className="text-center space-y-4">
           <div className="w-10 h-10 border-2 border-[#123E33] border-t-transparent animate-spin mx-auto"></div>
           <p className="text-xs uppercase tracking-[0.2em] font-bold text-[#123E33]">Carregando nunesinformatica.online...</p>
@@ -442,7 +475,7 @@ export default function App() {
   // --- LOGIN & REGISTER VIEW ---
   if (!currentUser) {
     return (
-      <div id="loginView" className="min-h-screen flex flex-col border-8 border-[#123E33] bg-[#FAF9F6] text-[#123E33] font-sans">
+      <div id="loginView" className="min-h-screen flex flex-col border-4 md:border-8 border-[#123E33] bg-[#FAF9F6] text-[#123E33] font-sans overflow-x-hidden">
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12">
           {/* Left Branding Side */}
           <div 
@@ -626,6 +659,85 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+              ) : loginMatches.length > 0 ? (
+                <>
+                  <div className="space-y-1.5 pb-2 text-center">
+                    <h2 className="text-2xl font-bold tracking-tight text-gray-900 font-serif italic">Selecione seu Perfil</h2>
+                    <p className="text-xs text-gray-500">Múltiplos perfis encontrados com este e-mail. Escolha qual deseja acessar:</p>
+                  </div>
+
+                  <div className="space-y-3 py-2 max-h-80 overflow-y-auto">
+                    {loginMatches.map((matchedUser) => {
+                      const adm = administradoras.find(a => a.id === matchedUser.administradoraId);
+                      const condos = condominios.filter(c => matchedUser.condominiumIds?.includes(c.id));
+                      
+                      return (
+                        <button
+                          key={matchedUser.id}
+                          onClick={() => {
+                            setCurrentUser(matchedUser);
+                            localStorage.setItem("portal_user", JSON.stringify(matchedUser));
+                            setLoginEmail("");
+                            setLoginPassword("");
+                            setLoginMatches([]);
+
+                            if (matchedUser.role === "Sindico" && matchedUser.condominiumIds && matchedUser.condominiumIds.length === 1) {
+                              setSelectedCondominiumId(matchedUser.condominiumIds[0]);
+                            } else {
+                              setSelectedCondominiumId(null);
+                            }
+
+                            addDoc(collection(db, "auditoria"), {
+                              userId: matchedUser.id,
+                              userName: matchedUser.name,
+                              userRole: matchedUser.role,
+                              action: "Login (Multi-perfil)",
+                              details: `Acessou como ${matchedUser.role} - Perfil: ${matchedUser.name}`,
+                              createdAt: new Date().toISOString(),
+                            });
+                          }}
+                          className="w-full text-left p-3.5 border border-gray-200 hover:border-[#123E33] hover:bg-[#FAF9F6] transition-all rounded-lg flex flex-col gap-1 cursor-pointer group"
+                        >
+                          <div className="flex items-center justify-between w-full">
+                            <span className="font-bold text-sm text-[#111111] group-hover:text-[#123E33] transition-colors">
+                              {matchedUser.name}
+                            </span>
+                            <span className={`text-[9px] font-bold uppercase px-2 py-0.5 border rounded-none ${
+                              matchedUser.role === "SuperADM" 
+                                ? "bg-purple-50 text-purple-700 border-purple-200"
+                                : matchedUser.role === "Administrador"
+                                  ? "bg-blue-50 text-blue-700 border-blue-200"
+                                  : "bg-[#123E33]/5 text-[#123E33] border-[#123E33]/20"
+                            }`}>
+                              {matchedUser.role}
+                            </span>
+                          </div>
+                          
+                          <div className="text-[10px] text-gray-500 font-serif italic">
+                            {adm && <div>🏢 Administradora: <span className="font-sans font-bold text-gray-700 uppercase text-[9px]">{adm.name}</span></div>}
+                            {condos.length > 0 && (
+                              <div className="mt-0.5 truncate">
+                                🏠 Condomínios: <span className="font-sans font-bold text-gray-700 text-[9px]">{condos.map(c => c.name).join(", ")}</span>
+                              </div>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="pt-3 text-center border-t border-gray-100">
+                    <button
+                      onClick={() => {
+                        setLoginMatches([]);
+                        setLoginPassword("");
+                      }}
+                      className="text-xs font-bold text-[#123E33] hover:text-[#C2A87E] transition-colors underline cursor-pointer"
+                    >
+                      Voltar para o Login
+                    </button>
+                  </div>
+                </>
               ) : (
                 <>
                   <div className="space-y-1.5 pb-2">
@@ -744,7 +856,7 @@ export default function App() {
   // --- PASSWORD CHANGE FORCE SCREEN (FIRST ACCESS) ---
   if (currentUser && currentUser.firstAccess === true) {
     return (
-      <div id="passwordForceView" className="min-h-screen flex items-center justify-center border-8 border-[#123E33] bg-[#FAF9F6] text-[#123E33] font-sans p-6">
+      <div id="passwordForceView" className="min-h-screen flex items-center justify-center border-4 md:border-8 border-[#123E33] bg-[#FAF9F6] text-[#123E33] font-sans p-4 sm:p-6 overflow-x-hidden">
         <div className="w-full max-w-md p-8 md:p-10 border border-[#123E33] bg-white space-y-6 shadow-none">
           <div className="space-y-2 pb-4 border-b border-[#123E33]/10 text-center">
             <span className="w-2.5 h-2.5 rounded-full bg-[#C2A87E] inline-block animate-pulse mb-1"></span>
@@ -816,11 +928,19 @@ export default function App() {
 
   // --- MAIN APP PORTAL VIEW ---
   return (
-    <div id="appView" className="min-h-screen flex flex-col md:flex-row bg-[#FAF9F6] text-[#123E33] font-sans border-8 border-[#123E33] overflow-hidden">
+    <div id="appView" className="min-h-screen flex flex-col md:flex-row bg-[#FAF9F6] text-[#123E33] font-sans border-4 md:border-8 border-[#123E33] overflow-x-hidden md:overflow-hidden">
       
       {/* MOBILE HEADER */}
       <header className="md:hidden flex items-center justify-between bg-[#123E33] text-white px-5 py-4 border-b border-[#123E33]">
-        <div className="flex items-center gap-2">
+        <div 
+          onClick={() => {
+            setSelectedCondominiumId("");
+            setActiveTab("folders");
+            setIsSidebarOpen(false);
+          }}
+          className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+          title="Ir para a Página Inicial"
+        >
           <span className="font-serif italic font-bold tracking-wider text-base text-white">
             nunesinformatica.online
           </span>
@@ -842,9 +962,17 @@ export default function App() {
       >
         <div className="space-y-6 flex-1 flex flex-col min-h-0">
           {/* Logo */}
-          <div className="space-y-1 pb-6 border-b border-[#123E33]">
-            <p className="text-[10px] uppercase tracking-[0.2em] font-bold opacity-60">Sistema de Gestão</p>
-            <h1 className="font-serif italic text-2xl leading-none">Nunes <br/>Informática</h1>
+          <div 
+            onClick={() => {
+              setSelectedCondominiumId("");
+              setActiveTab("folders");
+              setIsSidebarOpen(false);
+            }}
+            className="space-y-1 pb-6 border-b border-[#123E33] cursor-pointer hover:opacity-80 transition-all group"
+            title="Ir para a Página Inicial"
+          >
+            <p className="text-[10px] uppercase tracking-[0.2em] font-bold opacity-60 group-hover:text-[#C2A87E] transition-colors">Sistema de Gestão</p>
+            <h1 className="font-serif italic text-2xl leading-none group-hover:text-[#C2A87E] transition-colors">Nunes <br/>Informática</h1>
           </div>
 
           {/* User Info Card */}
@@ -860,40 +988,171 @@ export default function App() {
             </p>
           </div>
 
+          {/* Home Button */}
+          <button
+            onClick={() => {
+              setSelectedCondominiumId("");
+              setActiveTab("folders");
+              setIsSidebarOpen(false);
+            }}
+            className={`w-full flex items-center justify-center gap-2 py-3 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border ${
+              !selectedCondominiumId && activeTab !== "admin" && activeTab !== "audit"
+                ? "bg-[#123E33] text-white border-[#123E33]"
+                : "bg-white text-[#123E33] border-[#123E33]/20 hover:border-[#123E33]"
+            }`}
+            title="Ir para a Página Inicial"
+          >
+            <Home className="w-4 h-4" /> Início / Home
+          </button>
+
           {/* Condominium List Selection */}
-          <div className="space-y-2 flex-1 flex flex-col min-h-0 pt-4">
+          <div className="space-y-2 flex-1 flex flex-col min-h-0 pt-2">
             <p className="text-[9px] uppercase tracking-widest opacity-50 mb-1 flex items-center justify-between">
               <span>Nossos Condomínios</span>
               <span className="bg-[#123E33] text-white px-2 py-0.5 text-[9px] uppercase font-bold">
                 {visibleCondos.length}
               </span>
             </p>
-            <div id="condominiumNav" className="overflow-y-auto space-y-1.5 pr-1 flex-1">
+            <div id="condominiumNav" className="overflow-y-auto space-y-3 pr-1 flex-1">
               {visibleCondos.length === 0 ? (
                 <p className="text-xs text-gray-400 italic p-2 font-serif">Nenhum condomínio vinculado.</p>
               ) : (
-                visibleCondos.map((condo) => {
-                  const isSelected = condo.id === selectedCondominiumId;
-                  return (
-                    <button
-                      key={condo.id}
-                      onClick={() => {
-                        setSelectedCondominiumId(condo.id);
-                        setIsSidebarOpen(false); // close mobile sidebar on select
-                      }}
-                      className={`w-full text-left p-3 text-xs font-bold transition-all flex items-center justify-between cursor-pointer border-b border-[#123E33]/10 ${
-                        isSelected
-                          ? "bg-[#123E33] text-white"
-                          : "text-[#123E33] hover:bg-[#C2A87E]/20 hover:text-[#123E33]"
-                      }`}
-                    >
-                      <span className="truncate">{condo.name}</span>
-                      <ChevronRight className={`w-3.5 h-3.5 shrink-0 transition-transform ${isSelected ? "rotate-90 text-white" : "opacity-40"}`} />
-                    </button>
-                  );
-                })
+                currentUser?.role === "SuperADM" || Array.from(new Set(visibleCondos.map(c => c.administradoraId))).length > 1 ? (
+                  <>
+                    {administradoras
+                      .map((adm) => {
+                        const admCondos = visibleCondos.filter(c => c.administradoraId === adm.id);
+                        if (admCondos.length === 0) return null;
+                        return (
+                          <div key={adm.id} className="space-y-1">
+                            <div className="text-[9px] uppercase tracking-wider font-bold text-[#123E33]/60 px-2 py-1 bg-[#123E33]/5 border-l-2 border-[#123E33] truncate">
+                              🏢 {adm.name}
+                            </div>
+                            <div className="space-y-0.5 pl-1">
+                              {admCondos.map((condo) => {
+                                const isSelected = condo.id === selectedCondominiumId;
+                                return (
+                                  <button
+                                    key={condo.id}
+                                    onClick={() => {
+                                      setSelectedCondominiumId(condo.id);
+                                      setIsSidebarOpen(false);
+                                    }}
+                                    className={`w-full text-left p-2.5 px-3 text-[11px] font-bold transition-all flex items-center justify-between cursor-pointer border-b border-[#123E33]/5 ${
+                                      isSelected
+                                        ? "bg-[#123E33] text-white"
+                                        : "text-[#123E33] hover:bg-[#C2A87E]/10"
+                                    }`}
+                                  >
+                                    <span className="truncate">{condo.name}</span>
+                                    <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${isSelected ? "rotate-90 text-white" : "opacity-30"}`} />
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    {visibleCondos.filter(c => !c.administradoraId).length > 0 && (
+                      <div className="space-y-1">
+                        <div className="text-[9px] uppercase tracking-wider font-bold text-red-700/60 px-2 py-1 bg-red-50 border-l-2 border-red-500 truncate">
+                          ⚠️ Sem Administradora
+                        </div>
+                        <div className="space-y-0.5 pl-1">
+                          {visibleCondos.filter(c => !c.administradoraId).map((condo) => {
+                            const isSelected = condo.id === selectedCondominiumId;
+                            return (
+                              <button
+                                key={condo.id}
+                                onClick={() => {
+                                  setSelectedCondominiumId(condo.id);
+                                  setIsSidebarOpen(false);
+                                }}
+                                className={`w-full text-left p-2.5 px-3 text-[11px] font-bold transition-all flex items-center justify-between cursor-pointer border-b border-[#123E33]/5 ${
+                                  isSelected
+                                    ? "bg-[#123E33] text-white"
+                                    : "text-red-700 hover:bg-red-50/50"
+                                }`}
+                              >
+                                <span className="truncate">{condo.name}</span>
+                                <ChevronRight className={`w-3 h-3 shrink-0 transition-transform ${isSelected ? "rotate-90 text-white" : "opacity-30"}`} />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  visibleCondos.map((condo) => {
+                    const isSelected = condo.id === selectedCondominiumId;
+                    return (
+                      <button
+                        key={condo.id}
+                        onClick={() => {
+                          setSelectedCondominiumId(condo.id);
+                          setIsSidebarOpen(false); // close mobile sidebar on select
+                        }}
+                        className={`w-full text-left p-3 text-xs font-bold transition-all flex items-center justify-between cursor-pointer border-b border-[#123E33]/10 ${
+                          isSelected
+                            ? "bg-[#123E33] text-white"
+                            : "text-[#123E33] hover:bg-[#C2A87E]/20 hover:text-[#123E33]"
+                        }`}
+                      >
+                        <span className="truncate">{condo.name}</span>
+                        <ChevronRight className={`w-3.5 h-3.5 shrink-0 transition-transform ${isSelected ? "rotate-90 text-white" : "opacity-40"}`} />
+                      </button>
+                    );
+                  })
+                )
               )}
             </div>
+          </div>
+        </div>
+
+        {/* Theme Switcher Selection */}
+        <div className="py-4 border-t border-[#123E33]/20 space-y-2 mt-4">
+          <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-widest opacity-50 font-bold">
+            <Palette className="w-3 h-3" />
+            <span>Tema do Portal</span>
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            <button
+              onClick={() => setTheme("emerald")}
+              className={`py-1.5 px-1 text-[9px] uppercase font-bold tracking-wider transition-all border flex flex-col items-center gap-1 cursor-pointer rounded-none ${
+                theme === "emerald"
+                  ? "bg-[#123E33] text-white border-[#123E33]"
+                  : "bg-white text-[#123E33] border-[#123E33]/20 hover:bg-[#EEF2F0]"
+              }`}
+              title="Tema Clássico Verde Esmeralda"
+            >
+              <span className="w-2.5 h-2.5 rounded-full bg-[#123E33] border border-white/20"></span>
+              <span>Claro</span>
+            </button>
+            <button
+              onClick={() => setTheme("dark")}
+              className={`py-1.5 px-1 text-[9px] uppercase font-bold tracking-wider transition-all border flex flex-col items-center gap-1 cursor-pointer rounded-none ${
+                theme === "dark"
+                  ? "bg-[#1E293B] text-white border-[#1E293B]"
+                  : "bg-white text-[#123E33] border-[#123E33]/20 hover:bg-[#EEF2F0]"
+              }`}
+              title="Tema Escuro Obsidiana"
+            >
+              <span className="w-2.5 h-2.5 rounded-full bg-[#0B0F19] border border-white/20"></span>
+              <span>Escuro</span>
+            </button>
+            <button
+              onClick={() => setTheme("burgundy")}
+              className={`py-1.5 px-1 text-[9px] uppercase font-bold tracking-wider transition-all border flex flex-col items-center gap-1 cursor-pointer rounded-none ${
+                theme === "burgundy"
+                  ? "bg-[#5C1D24] text-white border-[#5C1D24]"
+                  : "bg-white text-[#123E33] border-[#123E33]/20 hover:bg-[#EEF2F0]"
+              }`}
+              title="Tema Imperial Vinho Nobre"
+            >
+              <span className="w-2.5 h-2.5 rounded-full bg-[#5C1D24] border border-white/20"></span>
+              <span>Vinho</span>
+            </button>
           </div>
         </div>
 
@@ -922,7 +1181,7 @@ export default function App() {
       )}
 
       {/* WORKSPACE CONTENT AREA */}
-      <main id="workspaceArea" className="flex-1 flex flex-col h-full min-w-0 overflow-y-auto">
+      <main id="workspaceArea" className="flex-1 flex flex-col h-full min-w-0 overflow-y-auto overflow-x-hidden">
         
         {dbError && (
           <div className="bg-red-50 border-b border-red-200 text-red-800 px-8 py-3 text-xs font-medium flex items-center justify-between gap-4">
@@ -943,7 +1202,7 @@ export default function App() {
         )}
         
         {/* Dynamic header depending on condominium selection */}
-        <header className="border-b border-[#123E33] p-8 md:p-10 flex flex-col sm:flex-row sm:items-baseline justify-between gap-4 bg-white">
+        <header className="border-b border-[#123E33] p-4 sm:p-8 md:p-10 flex flex-col sm:flex-row sm:items-baseline justify-between gap-4 bg-white">
           <div className="space-y-1">
             <p className="text-[11px] uppercase tracking-[0.3em] font-bold">Unidade de Controle</p>
             <h1 id="condominiumTitle" className="text-3xl md:text-5xl font-serif italic tracking-tight text-[#123E33]">
@@ -1014,7 +1273,7 @@ export default function App() {
         )}
 
         {/* WORKSPACE VIEWS */}
-        <div className="flex-1 p-6 md:p-8 bg-[#FAF9F6]">
+        <div className="flex-1 p-4 sm:p-6 md:p-8 bg-[#FAF9F6]">
           {(selectedCondominiumId || activeTab === "admin" || activeTab === "audit") ? (
             <div className="h-full">
               {/* TABS VIEW RENDER */}

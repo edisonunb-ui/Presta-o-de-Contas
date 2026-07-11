@@ -6,10 +6,61 @@
   --font-serif: "Playfair Display", Georgia, serif;
 }
 
+html, body {
+  max-width: 100%;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+/* Theme variables */
+:root {
+  /* Default: Claro / Esmeralda */
+  --color-primary: #123E33;
+  --color-primary-hover: #1c5d4d;
+  --color-primary-light: #EEF2F0;
+  --color-bg: #FAF9F6;
+  --color-card: #FFFFFF;
+  --color-text: #123E33;
+  --color-accent: #C2A87E;
+  --color-accent-hover: #b59a6d;
+  --color-border: #123E33;
+  --color-border-light: rgba(18, 62, 51, 0.15);
+}
+
+body.theme-dark {
+  /* Escuro: Obsidiana */
+  --color-primary: #1F2937;
+  --color-primary-hover: #374151;
+  --color-primary-light: #111827;
+  --color-bg: #0C0F12;
+  --color-card: #161C24;
+  --color-text: #38BDF8;
+  --color-accent: #38BDF8;
+  --color-accent-hover: #0EA5E9;
+  --color-border: #334155;
+  --color-border-light: rgba(56, 189, 248, 0.2);
+}
+
+body.theme-burgundy {
+  /* Vinho Nobre */
+  --color-primary: #5C1D24;
+  --color-primary-hover: #7A2831;
+  --color-primary-light: #FAF5F5;
+  --color-bg: #FDFBFB;
+  --color-card: #FFFFFF;
+  --color-text: #5C1D24;
+  --color-accent: #D4AF37;
+  --color-accent-hover: #bda030;
+  --color-border: #5C1D24;
+  --color-border-light: rgba(92, 29, 36, 0.15);
+}
+
 body {
   font-family: var(--font-sans);
-  background-color: #FAF9F6;
-  color: #123E33;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  transition: background-color 0.2s, color 0.2s;
 }
 
 h1, h2, h3, h4 {
@@ -25,10 +76,161 @@ h1, h2, h3, h4 {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #123E33;
+  background: var(--color-primary);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #C2A87E;
+  background: var(--color-accent);
+}
+
+/* Class Redirections to achieve zero-refactor dynamic theme support */
+.bg-\[\#123E33\], [class~="bg-[#123E33]"] {
+  background-color: var(--color-primary) !important;
+}
+.text-\[\#123E33\], [class~="text-[#123E33]"] {
+  color: var(--color-text) !important;
+}
+.border-\[\#123E33\], [class~="border-[#123E33]"] {
+  border-color: var(--color-border) !important;
+}
+.bg-\[\#FAF9F6\], [class~="bg-[#FAF9F6]"] {
+  background-color: var(--color-bg) !important;
+}
+.border-\[\#FAF9F6\], [class~="border-[#FAF9F6]"] {
+  border-color: var(--color-bg) !important;
+}
+.bg-\[\#C2A87E\], [class~="bg-[#C2A87E]"] {
+  background-color: var(--color-accent) !important;
+}
+.text-\[\#C2A87E\], [class~="text-[#C2A87E]"] {
+  color: var(--color-accent) !important;
+}
+.border-\[\#C2A87E\], [class~="border-[#C2A87E]"] {
+  border-color: var(--color-accent) !important;
+}
+.hover\:bg-\[\#1c5d4d\]:hover, [class*="hover:bg-[#1c5d4d]"]:hover {
+  background-color: var(--color-primary-hover) !important;
+}
+.hover\:bg-\[\#b59a6d\]:hover, [class*="hover:bg-[#b59a6d]"]:hover {
+  background-color: var(--color-accent-hover) !important;
+}
+.bg-\[\#EEF2F0\], [class~="bg-[#EEF2F0]"] {
+  background-color: var(--color-primary-light) !important;
+}
+.border-\[\#123E33\]\/10, [class~="border-[#123E33]/10"] {
+  border-color: var(--color-border-light) !important;
+}
+.border-\[\#123E33\]\/20, [class~="border-[#123E33]/20"] {
+  border-color: var(--color-border-light) !important;
+}
+.bg-\[\#123E33\]\/10, [class~="bg-[#123E33]/10"] {
+  background-color: var(--color-border-light) !important;
+}
+.text-\[\#123E33\]\/80, [class~="text-[#123E33]/80"] {
+  color: var(--color-text) !important;
+  opacity: 0.8;
+}
+.hover\:bg-\[\#C2A87E\]\/20:hover, [class*="hover:bg-[#C2A87E]/20"]:hover {
+  background-color: var(--color-border-light) !important;
+}
+
+/* Extra Theme overrides for Dark Theme to make it perfect */
+body.theme-dark {
+  /* Set the default text color of the body and general text to a softer white */
+  color: #E2E8F0 !important;
+  
+  /* All elements that use absolute text-[#123E33] or text-[#111111] (like paragraphs, lists, descriptions) should become soft gray-white */
+  span.text-\[\#123E33\], span[class~="text-[#123E33]"],
+  p.text-\[\#123E33\], p[class~="text-[#123E33]"],
+  div.text-\[\#123E33\], div[class~="text-[#123E33]"],
+  label.text-\[\#123E33\], label[class~="text-[#123E33]"],
+  td.text-\[\#123E33\], td[class~="text-[#123E33]"],
+  span.text-\[\#111111\], span[class~="text-[#111111]"],
+  p.text-\[\#111111\], p[class~="text-[#111111]"],
+  div.text-\[\#111111\], div[class~="text-[#111111]"],
+  label.text-\[\#111111\], label[class~="text-[#111111]"],
+  td.text-\[\#111111\], td[class~="text-[#111111]"] {
+    color: #E2E8F0 !important;
+  }
+  
+  /* Titles/Headings, active navigations, and buttons should use the cyan accent */
+  h1, h2, h3, h4, h5, h6,
+  [id*="condominiumTitle"], 
+  .font-serif, 
+  button.text-\[\#123E33\], button[class~="text-[#123E33]"],
+  a.text-\[\#123E33\], a[class~="text-[#123E33]"],
+  button.text-\[\#111111\], button[class~="text-[#111111]"],
+  a.text-\[\#111111\], a[class~="text-[#111111]"] {
+    color: var(--color-text) !important;
+  }
+  
+  /* Prevent dark text on dark backgrounds */
+  .text-gray-900, .text-stone-900, .text-slate-900 {
+    color: #FFFFFF !important;
+  }
+  .text-gray-800, .text-stone-800, .text-slate-800 {
+    color: #F1F5F9 !important;
+  }
+  .text-gray-700, .text-stone-700, .text-slate-700 {
+    color: #E2E8F0 !important;
+  }
+  .text-gray-600, .text-stone-600, .text-slate-600 {
+    color: #CBD5E1 !important;
+  }
+  .text-gray-500, .text-stone-500, .text-slate-500 {
+    color: #94A3B8 !important;
+  }
+  
+  /* Replace pure white panels and light warm off-whites with slate slate-800 or dark card background */
+  .bg-white, [class~="bg-white"],
+  .bg-\[\#F9F8F6\], [class~="bg-[#F9F8F6]"],
+  .bg-\[\#F4F2EE\], [class~="bg-[#F4F2EE]"],
+  .bg-\[\#FDFBFB\], [class~="bg-[#FDFBFB]"],
+  .bg-\[\#FAF5F5\], [class~="bg-[#FAF5F5]"],
+  .bg-\[\#EEEEEE\], [class~="bg-[#EEEEEE]"],
+  .bg-\[\#FDFCFB\], [class~="bg-[#FDFCFB]"] {
+    background-color: var(--color-card) !important;
+  }
+  
+  .bg-stone-50, .bg-gray-50, .bg-slate-50 {
+    background-color: #1E293B !important;
+  }
+  
+  .bg-stone-100, .bg-gray-100, .bg-slate-100 {
+    background-color: #0F172A !important;
+  }
+  
+  /* Map bg-[#111111] (black buttons, badges, lines) to a clean dark theme element */
+  .bg-\[\#111111\], [class~="bg-[#111111]"] {
+    background-color: var(--color-primary) !important;
+    color: #FFFFFF !important;
+  }
+  .hover\:bg-\[\#111111\]:hover, [class*="hover:bg-[#111111]"]:hover {
+    background-color: var(--color-primary-hover) !important;
+  }
+  
+  /* Borders */
+  .border-stone-200, .border-gray-200, .border-slate-200, .border-[#111111]/20 {
+    border-color: #334155 !important;
+  }
+  .border-\[\#111111\], [class~="border-[#111111]"] {
+    border-color: var(--color-border) !important;
+  }
+  .border-\[\#111111\]\/10, [class~="border-[#111111]/10"],
+  .border-\[\#111111\]\/20, [class~="border-[#111111]/20"] {
+    border-color: var(--color-border-light) !important;
+  }
+  
+  /* Dropdowns, forms and controls */
+  input, select, textarea {
+    background-color: #0B0F19 !important;
+    color: #F1F5F9 !important;
+    border-color: #334155 !important;
+  }
+  
+  /* App Outer Borders */
+  .border-4.border-[#123E33], .border-8.border-[#123E33] {
+    border-color: var(--color-primary) !important;
+  }
 }
 
 
