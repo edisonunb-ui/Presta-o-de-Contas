@@ -1,32 +1,28 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /usuarios/{document} {
+    match /usuarios/{document=**} {
       allow read, write: if true;
     }
-    match /administradoras/{document} {
+    match /administradoras/{document=**} {
       allow read, write: if true;
     }
-    match /condominios/{document} {
+    match /condominios/{document=**} {
       allow read, write: if true;
     }
-    match /pastas/{document} {
+    match /pastas/{document=**} {
       allow read, write: if true;
     }
-    match /arquivos/{document} {
-      allow read, write: if true;
-      
-      match /chunks/{chunk} {
-        allow read, write: if true;
-      }
-    }
-    match /protocolos/{document} {
+    match /arquivos/{document=**} {
       allow read, write: if true;
     }
-    match /mensagens/{document} {
+    match /protocolos/{document=**} {
       allow read, write: if true;
     }
-    match /auditoria/{document} {
+    match /mensagens/{document=**} {
+      allow read, write: if true;
+    }
+    match /auditoria/{document=**} {
       allow read, write: if true;
     }
     
