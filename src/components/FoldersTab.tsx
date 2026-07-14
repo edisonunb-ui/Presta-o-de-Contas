@@ -29,6 +29,17 @@ const MONTHS_PT = [
   "Dezembro",
 ];
 
+const formatFirebaseError = (err: any): string => {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg.includes("quota") || msg.includes("exhausted") || msg.includes("Quota") || msg.includes("resource-exhausted")) {
+    return "Limite diário de envio de arquivos excedido no Firebase (Quota Exceeded). Para corrigir de imediato e sem limites diários rígidos, atualize o seu projeto no console do Firebase para o plano 'Blaze' (Pay-As-You-Go - gratuito para baixo uso e remove os limites diários de escrita) ou aguarde o reset automático que ocorre a cada 24 horas.";
+  }
+  if (msg.includes("permission") || msg.includes("permission-denied") || msg.includes("Missing or insufficient permissions")) {
+    return "Permissão insuficiente ou negada no banco de dados. Verifique suas regras ou atualize a página.";
+  }
+  return msg;
+};
+
 export default function FoldersTab({
   currentUser,
   selectedCondominiumId,
@@ -313,7 +324,7 @@ export default function FoldersTab({
         await uploadSingleFile(file);
       } catch (err) {
         console.error(err);
-        setUploadError(`Erro ao enviar o arquivo "${file.name}": ${err instanceof Error ? err.message : String(err)}`);
+        setUploadError(`Erro ao enviar o arquivo "${file.name}": ${formatFirebaseError(err)}`);
         setIsUploading(false);
         setUploadProgress("");
         return;
@@ -334,7 +345,7 @@ export default function FoldersTab({
           const base64String = (reader.result as string).split(",")[1];
           const totalSize = file.size;
 
-          const CHUNK_SIZE = 700000; // ~700KB per chunk
+          const CHUNK_SIZE = 950000; // ~950KB per chunk (optimized to use fewer writes, staying safely under the 1MB Firestore limit)
           const isLargeFile = base64String.length > CHUNK_SIZE;
 
           const docData: any = {
@@ -516,7 +527,7 @@ export default function FoldersTab({
           onRefresh();
         } catch (err) {
           console.error(err);
-          showAlert("Erro", "Erro ao excluir o arquivo do banco de dados: " + (err instanceof Error ? err.message : String(err)));
+          showAlert("Erro", "Erro ao excluir o arquivo do banco de dados: " + formatFirebaseError(err));
         }
       }
     );
@@ -562,7 +573,7 @@ export default function FoldersTab({
           onRefresh();
         } catch (err) {
           console.error(err);
-          showAlert("Erro", "Erro ao excluir a pasta do banco de dados: " + (err instanceof Error ? err.message : String(err)));
+          showAlert("Erro", "Erro ao excluir a pasta do banco de dados: " + formatFirebaseError(err));
         }
       }
     );

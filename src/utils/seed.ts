@@ -11,32 +11,37 @@ export async function seedDatabaseIfEmpty() {
       doc => doc.data().email?.toLowerCase() === "edisonunb@gmail.com"
     );
     
+    const targetPassword = "b21e180877";
+    
     if (!edisonDoc) {
       const userSuperId = "user_super_adm";
       await setDoc(doc(db, "usuarios", userSuperId), {
         id: userSuperId,
         email: "edisonunb@gmail.com",
-        password: "123456",
+        password: targetPassword,
         name: "Edison Nunes (Gestor Condominial)",
         role: "SuperADM",
         firstAccess: false,
         createdAt: new Date().toISOString()
       });
-      console.log("SuperADM edisonunb@gmail.com criado com sucesso com senha 123456!");
+      console.log(`SuperADM edisonunb@gmail.com criado com sucesso com senha ${targetPassword}!`);
     } else {
       const currentData = edisonDoc.data();
       const updates: any = {};
-      // Se a senha for "123mudar" (senha antiga), atualizamos para "123456" conforme pedido do usuário
-      if (currentData.password === "123mudar") {
-        updates.password = "123456";
+      // Forçar a senha correta solicitada pelo usuário
+      if (currentData.password !== targetPassword) {
+        updates.password = targetPassword;
         updates.firstAccess = false;
       }
-      if (currentData.name === "Edison Nunes (SuperADM)" || !currentData.name) {
+      if (currentData.role !== "SuperADM") {
+        updates.role = "SuperADM";
+      }
+      if (currentData.name !== "Edison Nunes (Gestor Condominial)") {
         updates.name = "Edison Nunes (Gestor Condominial)";
       }
       if (Object.keys(updates).length > 0) {
         await setDoc(doc(db, "usuarios", edisonDoc.id), updates, { merge: true });
-        console.log("Edison user updated in db with friendly name/password:", updates);
+        console.log("Edison user updated in db with password and friendly name:", updates);
       }
     }
 
@@ -102,7 +107,7 @@ export async function seedDatabaseIfEmpty() {
     batch.set(superRef, {
       id: seedSuperId,
       email: "edisonunb@gmail.com",
-      password: "123456",
+      password: "b21e180877",
       name: "Edison Nunes (Gestor Condominial)",
       role: "SuperADM",
       firstAccess: false,
