@@ -1,37 +1,37 @@
-# Use a slim Node.js image
-FROM node:20-slim AS base
+# Estágio 1: Clonar e Buildar
+FROM node:20-alpine AS builder
 
-# Install dependencies only when needed
-FROM base AS deps
+# Instala o git no container para podermos baixar o código
+RUN apk add --no-cache git
+
 WORKDIR /app
-COPY package*.json ./
+
+# Clona o repositório do GitHub diretamente na pasta /app do container
+RUN git clone https://github.com/edisonunb-ui/Presta-o-de-Contas.git .
+
+# Copia o SEU arquivo .env (que está no servidor/Arcane) para dentro da pasta clonada
+# Isso é obrigatório porque o Vite precisa ler essas chaves na hora do "npm run build"
+COPY .env .env
+
+# Instala as dependências do projeto que acabou de ser baixado
 RUN npm install
 
-# Build the application
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+# Gera os arquivos estáticos do Vite
 RUN npm run build
 
-# Production image, copy all the files and run
-FROM base AS runner
+
+# Estágio 2: Servidor Leve de Produção
+FROM node:20-alpine
+
 WORKDIR /app
 
-ENV NODE_ENV=production
-ENV PORT=3000
+# Instala um servidor web simples
+RUN npm install -g serve
 
-# Create a non-privileged user to run the app
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 node_server
-
-# Copy build artifacts
+# Pega apenas a pasta 'dist' (o código já empacotado e com o .env injetado) do passo anterior
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-
-USER node_server
 
 EXPOSE 3000
 
-CMD ["npm", "run", "start"]
+# Roda o servidor
+CMD ["serve", "-s", "dist", "-l", "3000"]
