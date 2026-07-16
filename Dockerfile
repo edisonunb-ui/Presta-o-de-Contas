@@ -1,22 +1,34 @@
-# Estágio 1: Clonar e Buildar
+# Estágio 1: Build
 FROM node:20-alpine AS builder
-
-# Instala o git no container para podermos baixar o código
-RUN apk add --no-cache git
 
 WORKDIR /app
 
-# Clona o repositório do GitHub diretamente na pasta /app do container
-RUN git clone https://github.com/edisonunb-ui/Presta-o-de-Contas.git .
+# 1. Declara os argumentos que o docker-compose vai enviar
+ARG VITE_FIREBASE_API_KEY
+ARG VITE_FIREBASE_AUTH_DOMAIN
+ARG VITE_FIREBASE_PROJECT_ID
+ARG VITE_FIREBASE_STORAGE_BUCKET
+ARG VITE_FIREBASE_MESSAGING_SENDER_ID
+ARG VITE_FIREBASE_APP_ID
+ARG VITE_FIREBASE_DATABASE_ID
 
-# Copia o SEU arquivo .env (que está no servidor/Arcane) para dentro da pasta clonada
-# Isso é obrigatório porque o Vite precisa ler essas chaves na hora do "npm run build"
-COPY .env .env
+# 2. Converte os argumentos em Variáveis de Ambiente pro Vite enxergar
+ENV VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY
+ENV VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN
+ENV VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID
+ENV VITE_FIREBASE_STORAGE_BUCKET=$VITE_FIREBASE_STORAGE_BUCKET
+ENV VITE_FIREBASE_MESSAGING_SENDER_ID=$VITE_FIREBASE_MESSAGING_SENDER_ID
+ENV VITE_FIREBASE_APP_ID=$VITE_FIREBASE_APP_ID
+ENV VITE_FIREBASE_DATABASE_ID=$VITE_FIREBASE_DATABASE_ID
 
-# Instala as dependências do projeto que acabou de ser baixado
+# Copia os arquivos de dependência
+COPY package*.json ./
 RUN npm install
 
-# Gera os arquivos estáticos do Vite
+# Copia todo o restante do código
+COPY . .
+
+# Roda o build. O Vite automaticamente vai pegar os 'ENV' definidos acima e injetar no código
 RUN npm run build
 
 
@@ -25,10 +37,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Instala um servidor web simples
 RUN npm install -g serve
 
-# Pega apenas a pasta 'dist' (o código já empacotado e com o .env injetado) do passo anterior
+# Pega o build pronto do estágio anterior
 COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
