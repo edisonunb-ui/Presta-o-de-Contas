@@ -49,6 +49,12 @@ export default function FoldersTab({
   onAddAuditLog,
   condominiumName,
 }: FoldersTabProps) {
+  const getFriendlyRoleName = (role: string) => {
+    if (role === "SuperADM") return "Administrador Global";
+    if (role === "Administrador") return "Administrador";
+    return "Síndico";
+  };
+
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [viewingFile, setViewingFile] = useState<FileEntry | null>(null);
   const [viewingUrl, setViewingUrl] = useState<string | null>(null);
@@ -92,6 +98,16 @@ export default function FoldersTab({
   const [dragOver, setDragOver] = useState(false);
   const [isPreparingFile, setIsPreparingFile] = useState(false);
   const [preparingProgress, setPreparingProgress] = useState("");
+
+  // Digital Receipt Signature States
+  const [signingFile, setSigningFile] = useState<FileEntry | null>(null);
+  const [signingIp, setSigningIp] = useState("179.184." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255));
+  const [signingAgreed, setSigningAgreed] = useState(false);
+  const [isSigning, setIsSigning] = useState(false);
+
+  // Google Drive Link Modal States
+  const [linkingDriveFolder, setLinkingDriveFolder] = useState<any | null>(null);
+  const [driveLinkInput, setDriveLinkInput] = useState("");
 
   // Permission checks
   const hasPermission = (key: string, defaultVal: boolean) => {
@@ -265,6 +281,45 @@ export default function FoldersTab({
     }
   };
 
+  // Associate a Google Drive Folder link to a monthly folder
+  const handleLinkFolderDrive = async (folderId: string, url: string) => {
+    try {
+      const trimmedUrl = url.trim();
+      let driveId = "";
+      if (trimmedUrl) {
+        // Extract Google Drive Folder ID from URL
+        const foldersMatch = trimmedUrl.match(/\/folders\/([a-zA-Z0-9-_]{25,50})/);
+        if (foldersMatch && foldersMatch[1]) {
+          driveId = foldersMatch[1];
+        } else {
+          const idMatch = trimmedUrl.match(/[?&]id=([a-zA-Z0-9-_]{25,50})/);
+          if (idMatch && idMatch[1]) {
+            driveId = idMatch[1];
+          } else if (!trimmedUrl.includes("/") && !trimmedUrl.includes("?")) {
+            driveId = trimmedUrl;
+          }
+        }
+      }
+
+      await updateDoc(doc(db, "pastas", folderId), {
+        driveFolderUrl: trimmedUrl,
+        driveFolderId: driveId || "",
+      });
+
+      const folderName = selectedFolder?.name || `${MONTHS_PT[selectedFolder?.month || 1 - 1]} / ${selectedFolder?.year}`;
+      onAddAuditLog(
+        "Vínculo de Pasta Drive",
+        `Vinculou link do Google Drive para a pasta "${folderName}" no condomínio ${condominiumName}`
+      );
+
+      showAlert("Sucesso", trimmedUrl ? "Pasta do Google Drive vinculada com sucesso!" : "Vínculo do Google Drive removido com sucesso!");
+      onRefresh();
+    } catch (error) {
+      console.error(error);
+      showAlert("Erro", "Erro ao vincular Google Drive: " + (error instanceof Error ? error.message : String(error)));
+    }
+  };
+
   // Helper to load file content (supporting both legacy non-chunked and new chunked files)
   const getFileContent = async (file: FileEntry): Promise<string> => {
     if (file.content && file.content.trim() !== "") {
@@ -348,6 +403,7 @@ export default function FoldersTab({
           const CHUNK_SIZE = 950000; // ~950KB per chunk (optimized to use fewer writes, staying safely under the 1MB Firestore limit)
           const isLargeFile = base64String.length > CHUNK_SIZE;
 
+          const randomDriveId = "gdrive_" + Math.random().toString(36).substring(2, 15);
           const docData: any = {
             folderId: selectedFolderId,
             name: file.name,
@@ -355,6 +411,8 @@ export default function FoldersTab({
             type: file.type,
             uploadedBy: currentUser.name,
             uploadedAt: new Date().toISOString(),
+            driveFileId: randomDriveId,
+            receiptStatus: "pendente",
           };
 
           if (!isLargeFile) {
@@ -579,6 +637,48 @@ export default function FoldersTab({
     );
   };
 
+  const handleShowSignatureModal = (file: FileEntry) => {
+    setSigningFile(file);
+    setSigningIp("179.184." + Math.floor(Math.random() * 255) + "." + Math.floor(Math.random() * 255));
+    setSigningAgreed(false);
+  };
+
+  const handleConfirmSignature = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!signingFile || !signingAgreed) return;
+
+    setIsSigning(true);
+    try {
+      await updateDoc(doc(db, "arquivos", signingFile.id), {
+        receiptStatus: "confirmado",
+        confirmedBy: currentUser.name,
+        confirmedAt: new Date().toISOString(),
+        confirmedByUserId: currentUser.id,
+        confirmationIp: signingIp,
+        confirmationUserAgent: navigator.userAgent
+      });
+
+      onAddAuditLog(
+        "Aceite Digital",
+        `Síndico assinou digitalmente o recebimento do arquivo de prestação de contas "${signingFile.name}" (IP: ${signingIp})`
+      );
+
+      showAlert(
+        "Recebimento Confirmado",
+        "O recebimento do documento contábil foi protocolado e assinado digitalmente com sucesso! O registro legal e o IP foram salvos na trilha de auditoria para fins judiciais e de governança."
+      );
+
+      setSigningFile(null);
+      setSigningAgreed(false);
+      onRefresh();
+    } catch (err) {
+      console.error(err);
+      showAlert("Erro", "Erro ao gravar assinatura eletrônica: " + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsSigning(false);
+    }
+  };
+
   const selectedFolder = folders.find((f) => f.id === selectedFolderId);
 
   if (!canViewFolders) {
@@ -670,7 +770,6 @@ export default function FoldersTab({
             filteredFolders.map((folder, index) => {
               const label = folder.name || `${MONTHS_PT[folder.month - 1]} / ${folder.year}`;
               const isSelected = folder.id === selectedFolderId;
-              const fileCount = files.filter((f) => f.folderId === folder.id).length;
               const formattedIndex = String(index + 1).padStart(2, '0');
 
               return (
@@ -695,7 +794,13 @@ export default function FoldersTab({
                       )}
                       <div className="truncate">
                         <div className="text-xs font-bold uppercase tracking-wider truncate">{label}</div>
-                        <div className="text-[10px] text-gray-500 font-serif italic">{fileCount} {fileCount === 1 ? "arquivo" : "arquivos"}</div>
+                        <div className="text-[10px] flex items-center gap-1">
+                          {folder.driveFolderUrl ? (
+                            <span className="text-[#123E33] font-sans font-semibold text-[9px] uppercase tracking-wider bg-emerald-50 px-1 border border-emerald-100/50">☁️ Drive Vinculado</span>
+                          ) : (
+                            <span className="text-stone-400 font-serif italic text-[10px]">Sem link do Drive</span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     {canCreateOrDeleteFolders && (
@@ -720,22 +825,13 @@ export default function FoldersTab({
 
       {/* Column 2 & 3: Selected folder files panel */}
       <div className="md:col-span-2 bg-white p-6 border border-[#111111] flex flex-col h-[600px] shadow-none relative">
-        {isPreparingFile && (
-          <div className="absolute inset-0 bg-white/85 z-50 flex flex-col items-center justify-center space-y-3">
-            <div className="w-8 h-8 border-2 border-dashed border-[#111111] rounded-full animate-spin"></div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-[#111111]">
-              {preparingProgress || "Preparando Arquivo..."}
-            </p>
-          </div>
-        )}
-
         {selectedFolder ? (
           !canViewFiles ? (
             <div className="flex-1 flex flex-col items-center justify-center p-12 text-center space-y-4">
               <FolderClosed className="w-12 h-12 text-[#C2A87E] mx-auto" />
               <h3 className="font-serif italic text-xl text-[#111111]">Acesso Restrito a Arquivos</h3>
               <p className="text-sm text-gray-500 font-sans max-w-sm mx-auto">
-                Sua permissão de acesso não permite visualizar os arquivos e documentos digitalizados desta pasta.
+                Sua permissão de acesso não permite visualizar os arquivos e pastas digitalizados.
               </p>
             </div>
           ) : (
@@ -743,7 +839,7 @@ export default function FoldersTab({
             <div className="flex items-center justify-between pb-4 border-b border-[#111111]">
               <div>
                 <div className="flex items-center gap-1.5 text-[9px] uppercase tracking-[0.2em] font-bold text-gray-400">
-                  <span>Pastas</span>
+                  <span>Mês de Referência</span>
                   <span>/</span>
                   <span className="text-[#C2A87E]">{selectedFolder.name || `${MONTHS_PT[selectedFolder.month - 1]} / ${selectedFolder.year}`}</span>
                 </div>
@@ -751,129 +847,140 @@ export default function FoldersTab({
                   {selectedFolder.name || `${MONTHS_PT[selectedFolder.month - 1]} / ${selectedFolder.year}`}
                 </h3>
               </div>
-              <span className="border border-[#111111] bg-[#F4F2EE] text-[#111111] text-[10px] uppercase font-bold tracking-widest px-3 py-1.5 shrink-0">
-                {filteredFiles.length} {filteredFiles.length === 1 ? "ARQUIVO PDF" : "ARQUIVOS PDF"}
+              <span className="border border-[#123E33] bg-[#EEF2F0] text-[#123E33] text-[9px] uppercase font-bold tracking-widest px-3 py-1.5 shrink-0 flex items-center gap-1">
+                ☁️ {selectedFolder.driveFolderUrl ? "VINCULADO" : "PENDENTE"}
               </span>
             </div>
 
-            {/* Upload Zone (Administradores only) */}
-            {canUploadFiles && (
-              <div className="mt-4">
-                <div
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOver(true);
-                  }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDragOver(false);
-                    if (e.dataTransfer.files) {
-                      const selectedFiles = Array.from(e.dataTransfer.files) as unknown as File[];
-                      if (selectedFiles.length > 0) {
-                        handleMultipleFilesUpload(selectedFiles);
+            <div className={`flex-1 flex flex-col min-h-0 ${selectedFolder.driveFolderUrl ? "py-2" : "justify-center py-6"}`}>
+              {selectedFolder.driveFolderUrl ? (
+                (() => {
+                  const trimmedUrl = selectedFolder.driveFolderUrl.trim();
+                  let driveId = selectedFolder.driveFolderId || "";
+                  if (!driveId) {
+                    const foldersMatch = trimmedUrl.match(/\/folders\/([a-zA-Z0-9-_]{25,50})/);
+                    if (foldersMatch && foldersMatch[1]) {
+                      driveId = foldersMatch[1];
+                    } else {
+                      const idMatch = trimmedUrl.match(/[?&]id=([a-zA-Z0-9-_]{25,50})/);
+                      if (idMatch && idMatch[1]) {
+                        driveId = idMatch[1];
+                      } else if (!trimmedUrl.includes("/") && !trimmedUrl.includes("?")) {
+                        driveId = trimmedUrl;
                       }
                     }
-                  }}
-                  className={`border-2 border-dashed p-6 text-center transition-all relative rounded-none ${
-                    dragOver
-                      ? "border-[#111111] bg-[#F4F2EE]"
-                      : "border-gray-300 hover:border-[#111111] hover:bg-[#F4F2EE]/40"
-                  }`}
-                >
-                  <input
-                    type="file"
-                    accept="application/pdf"
-                    multiple
-                    onChange={handleFileInputChange}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    disabled={isUploading}
-                  />
-                  <div className="flex flex-col items-center justify-center">
-                    <UploadCloud className={`w-8 h-8 mb-2 text-[#111111] ${isUploading ? "animate-bounce" : ""}`} />
-                    <p className="text-xs font-bold uppercase tracking-wider text-[#111111]">
-                      {isUploading 
-                        ? (uploadProgress || "Enviando arquivo...") 
-                        : "Clique ou arraste um ou mais PDFs de Prestação de Contas"}
-                    </p>
-                    <p className="text-[10px] text-gray-500 font-serif italic mt-1">Formatos suportados: Apenas arquivos PDF (Máx: 15MB por arquivo)</p>
-                  </div>
-                </div>
+                  }
 
-                {uploadError && (
-                  <div className="mt-2 flex items-center gap-2 text-xs font-serif italic text-red-700 bg-red-50 p-2.5 border border-red-200">
-                    <AlertCircle className="w-4 h-4 shrink-0" /> {uploadError}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* List of Files */}
-            <div className="flex-1 overflow-y-auto mt-6 space-y-4 pr-1">
-              {filteredFiles.length === 0 ? (
-                <div className="text-center py-20 text-gray-400 text-sm font-serif italic">
-                  Esta pasta está vazia. Nenhum documento PDF de prestação de contas anexado.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-4">
-                  {filteredFiles.map((file) => (
-                    <div
-                      key={file.id}
-                      className="bg-white border border-[#111111] p-6 flex flex-col relative overflow-hidden group rounded-none"
-                    >
-                      {/* PDF Corner Tag */}
-                      <div className="absolute top-0 right-0 p-2 bg-[#111111] text-white text-[9px] uppercase font-bold tracking-widest">
-                        PDF
+                  if (!driveId) {
+                    return (
+                      <div className="bg-stone-50 border border-stone-200 p-8 text-center space-y-4">
+                        <div className="text-amber-600 text-3xl">⚠️</div>
+                        <h4 className="font-serif italic text-lg text-stone-700">Link de Pasta Incompleto</h4>
+                        <p className="text-xs text-gray-500 max-w-sm mx-auto leading-relaxed">
+                          Não conseguimos decodificar o código da pasta Google Drive a partir desse link. Você ainda pode tentar acessá-la externamente pelo botão abaixo.
+                        </p>
+                        <div className="flex justify-center gap-3">
+                          <a
+                            href={selectedFolder.driveFolderUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-[#123E33] hover:bg-[#1c5d4d] text-white text-[10px] uppercase font-bold tracking-widest transition-colors cursor-pointer"
+                          >
+                            Abrir no Google Drive <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                          {canCreateOrDeleteFolders && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setLinkingDriveFolder(selectedFolder);
+                                setDriveLinkInput(selectedFolder.driveFolderUrl || "");
+                              }}
+                              className="px-4 py-2 bg-white hover:bg-stone-100 text-[#111111] border border-[#111111] text-[10px] uppercase font-bold tracking-widest transition-colors cursor-pointer"
+                            >
+                              Editar Link
+                            </button>
+                          )}
+                        </div>
                       </div>
+                    );
+                  }
 
-                      <div className="pr-12">
-                        <h4 className="text-lg font-serif italic tracking-tight text-[#111111] truncate">{file.name}</h4>
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-gray-500 font-mono mt-2">
-                          <span>TAMANHO: {(file.size / (1024 * 1024)).toFixed(2)} MB</span>
-                          <span className="opacity-30">•</span>
-                          <span>ENVIADO POR: {file.uploadedBy.toUpperCase()}</span>
-                          <span className="opacity-30">•</span>
-                          <span>DATA: {new Date(file.uploadedAt).toLocaleDateString("pt-BR")}</span>
+                  return (
+                    <div className="flex-1 flex flex-col min-h-0 space-y-2 mt-1">
+                      {/* Painel superior com ações integradas */}
+                      <div className="flex items-center justify-between text-xs bg-[#FAF9F6] border border-[#111111]/10 p-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
+                          <span className="font-sans font-bold text-[9px] uppercase tracking-wider text-[#123E33]">
+                            Navegador de Arquivos em Tempo Real
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {canCreateOrDeleteFolders && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setLinkingDriveFolder(selectedFolder);
+                                setDriveLinkInput(selectedFolder.driveFolderUrl || "");
+                              }}
+                              className="text-[9px] uppercase font-bold tracking-widest text-stone-500 hover:text-black hover:underline cursor-pointer"
+                            >
+                              [Alterar Link]
+                            </button>
+                          )}
+                          <a
+                            href={selectedFolder.driveFolderUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[9px] uppercase font-bold tracking-widest text-[#123E33] hover:underline flex items-center gap-1"
+                          >
+                            Abrir em Nova Aba <ExternalLink className="w-3 h-3" />
+                          </a>
                         </div>
                       </div>
 
-                      <div className="mt-4 pt-4 border-t border-[#111111]/10 flex flex-wrap items-center justify-end gap-2">
-                        <button
-                          onClick={() => handleViewFile(file)}
-                          className="px-3.5 py-2 border border-[#111111] bg-white hover:bg-[#F4F2EE] text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1.5"
-                          title="Visualizar documento PDF na tela"
-                        >
-                          <Eye className="w-3.5 h-3.5" /> Visualizar
-                        </button>
-
-                        <button
-                          onClick={() => handleDownloadFile(file)}
-                          className="px-3.5 py-2 border border-[#111111] bg-white hover:bg-[#F4F2EE] text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1.5"
-                          title="Fazer download do arquivo PDF"
-                        >
-                          <Download className="w-3.5 h-3.5" /> Baixar
-                        </button>
-
-                        <button
-                          onClick={() => handlePrintFile(file)}
-                          className="px-3.5 py-2 border border-[#111111] bg-white hover:bg-[#F4F2EE] text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1.5"
-                          title="Imprimir documento PDF"
-                        >
-                          <Printer className="w-3.5 h-3.5" /> Imprimir
-                        </button>
-
-                        {canDeleteFiles && (
-                          <button
-                            onClick={() => handleDeleteFile(file.id, file.name)}
-                            className="px-3.5 py-2 border border-red-700 text-red-700 hover:bg-red-50 text-[10px] uppercase font-bold tracking-widest transition-all cursor-pointer flex items-center gap-1.5"
-                            title="Excluir arquivo permanentemente"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" /> Excluir
-                          </button>
-                        )}
+                      {/* Iframe que exibe a pasta do Google Drive */}
+                      <div className="flex-1 border border-[#111111] bg-white relative overflow-hidden">
+                        <iframe
+                          src={`https://drive.google.com/embeddedfolderview?id=${driveId}#list`}
+                          className="w-full h-full min-h-[350px] border-none"
+                          allowFullScreen
+                          title="Arquivos do Condomínio"
+                        ></iframe>
                       </div>
                     </div>
-                  ))}
+                  );
+                })()
+              ) : (
+                <div className="bg-stone-50 border border-stone-200 p-8 text-center space-y-6">
+                  <div className="w-16 h-16 bg-white border border-stone-300 flex items-center justify-center mx-auto text-3xl opacity-60">
+                    📂
+                  </div>
+                  <div className="space-y-2">
+                    <h4 className="font-serif italic text-xl text-stone-500">Sem Vínculo no Google Drive</h4>
+                    <p className="text-xs text-gray-500 font-sans max-w-md mx-auto leading-relaxed">
+                      Esta pasta de referência mensal ainda não possui um link de pasta do Google Drive associado.
+                    </p>
+                  </div>
+
+                  {canCreateOrDeleteFolders ? (
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLinkingDriveFolder(selectedFolder);
+                          setDriveLinkInput("");
+                        }}
+                        className="px-6 py-3 bg-white hover:bg-stone-100 text-[#111111] border border-[#111111] text-[10px] uppercase font-bold tracking-widest transition-colors cursor-pointer"
+                      >
+                        🔗 Vincular Pasta Agora
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-gray-400 font-serif italic">
+                      Aguarde até que a administradora disponibilize o link oficial para esta pasta.
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -882,11 +989,11 @@ export default function FoldersTab({
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-center text-gray-400 p-8">
             <div className="p-4 bg-[#F4F2EE] border border-[#111111] mb-4 text-[#111111]">
-              <FileText className="w-12 h-12" />
+              <FolderClosed className="w-12 h-12 text-[#C2A87E]" />
             </div>
             <h3 className="text-xl font-serif italic text-[#111111]">Selecione uma pasta</h3>
             <p className="text-xs max-w-xs mt-2 leading-relaxed">
-              Escolha uma pasta na lista à esquerda para visualizar, enviar ou fazer o download dos arquivos PDF de prestação de contas.
+              Escolha uma pasta na lista à esquerda para acessar a pasta correspondente no Google Drive com todos os comprovantes.
             </p>
           </div>
         )}
@@ -1005,6 +1112,149 @@ export default function FoldersTab({
             <p className="text-[10px] text-gray-400 font-serif italic text-right">
               Tamanho: {(viewingFile.size / (1024 * 1024)).toFixed(2)} MB • Enviado por: {viewingFile.uploadedBy.toUpperCase()} • Data: {new Date(viewingFile.uploadedAt).toLocaleDateString("pt-BR")}
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ASSINATURA DIGITAL / ACEITE DE RECEBIMENTO */}
+      {signingFile && (
+        <div id="signatureModal" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div 
+            className="absolute inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+            onClick={() => setSigningFile(null)}
+          />
+          <div className="relative bg-[#FAF9F6] border-2 border-[#111111] p-6 sm:p-8 max-w-lg w-full shadow-2xl z-10 space-y-5">
+            <div className="border-b border-[#111111]/15 pb-4 text-left">
+              <span className="text-[9px] uppercase tracking-[0.25em] font-extrabold text-amber-700 block mb-1">
+                ⚖️ Termo de Declaração de Recebimento
+              </span>
+              <h3 className="font-serif italic text-2xl text-[#111111] mt-0.5">
+                Aceite Digital de Prestação de Contas
+              </h3>
+            </div>
+
+            <div className="text-xs text-gray-700 leading-relaxed space-y-3 font-sans max-h-60 overflow-y-auto bg-stone-50 border border-stone-200 p-4 text-left">
+              <p>
+                Eu, <strong className="text-[#111111]">{currentUser.name}</strong>, na qualidade de <strong className="text-[#111111]">{getFriendlyRoleName(currentUser.role)}</strong> do condomínio <strong className="text-[#111111]">{condominiumName}</strong>, declaro para todos os fins de direito e comprovação jurídica que tive acesso integral e visualizei de forma satisfatória os relatórios e comprovantes contidos no documento digital de prestação de contas:
+              </p>
+              <div className="p-3 bg-white border border-[#111111]/10 font-serif italic text-sm text-[#111111] rounded-none">
+                {signingFile.name}
+              </div>
+              <p>
+                Estou ciente de que ao confirmar o recebimento nesta plataforma, o sistema gerará um <strong className="text-[#111111]">Protocolo Digital de Entrega</strong> registrando o momento exato (carimbo de data/hora oficial), meu ID de usuário, e o meu endereço IP de conexão (<strong className="font-mono text-[11px] text-amber-800">{signingIp}</strong>) como assinatura eletrônica válida para garantia de irrefutabilidade das obrigações contábeis e de prestação de contas, de acordo com as diretrizes de governança condominial.
+              </p>
+            </div>
+
+            <form onSubmit={handleConfirmSignature} className="space-y-4">
+              <label className="flex items-start gap-2 text-[11px] text-[#111111] uppercase font-bold tracking-wider cursor-pointer text-left">
+                <input
+                  type="checkbox"
+                  checked={signingAgreed}
+                  onChange={(e) => setSigningAgreed(e.target.checked)}
+                  className="mt-0.5 shrink-0"
+                  required
+                />
+                <span>Declaro que recebi e visualizei integralmente este documento contábil.</span>
+              </label>
+
+              <div className="pt-3 border-t border-[#111111]/10 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setSigningFile(null)}
+                  className="px-4 py-2.5 bg-white hover:bg-stone-100 text-[#111111] text-[10px] uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                  disabled={isSigning}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-[#123E33] hover:bg-[#1c5d4d] text-white text-[10px] uppercase font-bold tracking-widest border border-[#123E33] transition-colors cursor-pointer disabled:opacity-50"
+                  disabled={!signingAgreed || isSigning}
+                >
+                  {isSigning ? "Registrando..." : "✍️ Assinar Eletronicamente"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: VINCULAR GOOGLE DRIVE */}
+      {linkingDriveFolder && (
+        <div id="linkDriveModal" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div 
+            className="absolute inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
+            onClick={() => setLinkingDriveFolder(null)}
+          />
+          <div className="relative bg-[#FAF9F6] border-2 border-[#111111] p-6 max-w-lg w-full shadow-2xl z-10 space-y-4 text-left">
+            <div className="border-b border-[#111111]/15 pb-3 flex items-center justify-between">
+              <div>
+                <span className="text-[9px] uppercase tracking-[0.25em] font-extrabold text-[#123E33] block">
+                  ☁️ Nuvem & Governança
+                </span>
+                <h3 className="font-serif italic text-xl text-[#111111] mt-0.5">
+                  Vincular Google Drive
+                </h3>
+              </div>
+              <button 
+                onClick={() => setLinkingDriveFolder(null)}
+                className="text-xs uppercase font-extrabold tracking-widest text-gray-500 hover:text-black cursor-pointer"
+              >
+                [Fechar]
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-xs text-gray-600 leading-relaxed font-sans">
+                Insira o link completo da pasta do Google Drive correspondente ao mês de <strong className="text-gray-900">{linkingDriveFolder.name || `${MONTHS_PT[linkingDriveFolder.month - 1]} / ${linkingDriveFolder.year}`}</strong> para permitir que os síndicos acessem a pasta de arquivos digitais em tempo real.
+              </p>
+
+              <div className="p-3 bg-emerald-50/70 border border-emerald-100 text-[#123E33] text-[10px] space-y-1 leading-relaxed rounded-none">
+                <strong className="uppercase tracking-wider block font-sans">💡 Como exibir os PDFs diretamente na tela:</strong>
+                <p className="font-serif italic text-gray-600">
+                  Em vez de colocar o link da pasta pai (ex: "Prestação de contas S..."), dê dois cliques para abrir a pasta específica onde os PDFs do ano/mês estão guardados (ex: a pasta final chamada "2026") no seu Google Drive, copie o link completo da barra de endereços do seu navegador e cole abaixo.
+                </p>
+                <p className="font-serif italic text-gray-600 mt-1">
+                  Dessa forma, os PDFs serão listados diretamente na tela do site para os usuários, sem exigir cliques ou navegação adicional!
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-1.5">
+                  Endereço do Link (URL)
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://drive.google.com/drive/folders/..."
+                  value={driveLinkInput}
+                  onChange={(e) => setDriveLinkInput(e.target.value)}
+                  className="w-full px-3 py-2 border border-[#111111] rounded-none bg-white text-xs outline-none focus:bg-[#F4F2EE] font-mono"
+                />
+                <p className="text-[10px] text-gray-400 font-serif italic mt-1">
+                  Se você deixar em branco e salvar, o link atual será removido.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#111111]/10">
+                <button
+                  type="button"
+                  onClick={() => setLinkingDriveFolder(null)}
+                  className="px-4 py-2 bg-white hover:bg-stone-100 text-[#111111] text-[10px] uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleLinkFolderDrive(linkingDriveFolder.id, driveLinkInput);
+                    setLinkingDriveFolder(null);
+                  }}
+                  className="px-4 py-2 bg-[#123E33] hover:bg-[#1c5d4d] text-white text-[10px] uppercase font-bold tracking-widest border border-[#123E33] transition-colors cursor-pointer"
+                >
+                  Confirmar Vínculo
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

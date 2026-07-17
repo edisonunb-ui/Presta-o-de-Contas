@@ -11,7 +11,7 @@ export async function seedDatabaseIfEmpty() {
       doc => doc.data().email?.toLowerCase() === "edisonunb@gmail.com"
     );
     
-    const targetPassword = "b21e180877";
+    const targetPassword = "B21e1808771210*";
     
     if (!edisonDoc) {
       const userSuperId = "user_super_adm";
@@ -107,7 +107,7 @@ export async function seedDatabaseIfEmpty() {
     batch.set(superRef, {
       id: seedSuperId,
       email: "edisonunb@gmail.com",
-      password: "b21e180877",
+      password: "B21e1808771210*",
       name: "Edison Nunes (Gestor Condominial)",
       role: "SuperADM",
       firstAccess: false,

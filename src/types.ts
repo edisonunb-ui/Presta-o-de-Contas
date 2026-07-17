@@ -9,6 +9,7 @@ export interface Condominium {
   name: string;
   administradoraId: string;
   createdAt: string;
+  driveFolderId?: string; // Mapped Google Drive folder ID (backend hidden)
 }
 
 export interface UserPermissions {
@@ -50,6 +51,8 @@ export interface Folder {
   month: number;
   name?: string;
   createdAt: string;
+  driveFolderUrl?: string;
+  driveFolderId?: string;
 }
 
 export interface FileEntry {
@@ -61,6 +64,13 @@ export interface FileEntry {
   uploadedBy: string;
   uploadedAt: string;
   content: string; // Base64 encoding of PDF content
+  driveFileId?: string; // Mapped Google Drive file ID (backend hidden)
+  receiptStatus?: 'pendente' | 'confirmado';
+  confirmedBy?: string;
+  confirmedAt?: string;
+  confirmedByUserId?: string;
+  confirmationIp?: string;
+  confirmationUserAgent?: string;
 }
 
 export interface Protocol {

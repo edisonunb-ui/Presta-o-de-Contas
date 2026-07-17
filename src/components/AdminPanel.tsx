@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { collection, addDoc, doc, updateDoc, deleteDoc, getDocs, setDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { User, Administradora, Condominium, UserPermissions } from "../types";
-import { Building2, Shield, UserCog, Plus, Trash2, Key, Users, CheckSquare, Folder, FolderOpen, ChevronRight, ChevronDown, User as UserIcon, Database, Download, Upload, FileJson, RefreshCw } from "lucide-react";
+import { Building2, Shield, UserCog, Plus, Trash2, Key, Users, CheckSquare, Folder, FolderOpen, ChevronRight, ChevronDown, User as UserIcon, Database, Download, Upload, FileJson, RefreshCw, ExternalLink } from "lucide-react";
 
 const getFriendlyRoleName = (role: string) => {
   if (role === "SuperADM") return "Gestor Condominial";
@@ -116,6 +116,11 @@ export default function AdminPanel({
   const [editRole, setEditRole] = useState<"Administrador" | "Sindico" | "SuperADM">("Sindico");
   const [editSelectedCondos, setEditSelectedCondos] = useState<string[]>([]);
   const [editAdmId, setEditAdmId] = useState("");
+
+  const [condoDriveLink, setCondoDriveLink] = useState("");
+  const [editingCondo, setEditingCondo] = useState<Condominium | null>(null);
+  const [editCondoName, setEditCondoName] = useState("");
+  const [editCondoDriveLink, setEditCondoDriveLink] = useState("");
   const [editPermissions, setEditPermissions] = useState<Required<UserPermissions>>({
     folders_view: true,
     folders_create: false,
@@ -394,6 +399,61 @@ export default function AdminPanel({
     }
   };
 
+  const handleWipeAllData = async () => {
+    showConfirm(
+      "CONFIRMAÇÃO DE SEGURANÇA MÁXIMA",
+      "ATENÇÃO: Esta ação é irreversível e excluirá permanentemente TODAS as pastas mensais de todos os condomínios e TODOS os respectivos relatórios/arquivos PDF (incluindo todos os fragmentos salvos no banco de dados). Deseja realmente prosseguir com a exclusão total?",
+      async () => {
+        setIsBackupLoading(true);
+        setBackupProgress("Iniciando limpeza total de pastas e arquivos...");
+        try {
+          // 1. Fetch all arquivos
+          setBackupProgress("Buscando arquivos cadastrados...");
+          const arquivosSnap = await getDocs(collection(db, "arquivos"));
+          let deletedFilesCount = 0;
+          for (const fileDoc of arquivosSnap.docs) {
+            setBackupProgress(`Excluindo fragmentos do arquivo ${deletedFilesCount + 1}/${arquivosSnap.size}...`);
+            // Delete chunks first
+            const chunksSnap = await getDocs(collection(db, "arquivos", fileDoc.id, "chunks"));
+            for (const chunkDoc of chunksSnap.docs) {
+              await deleteDoc(doc(db, "arquivos", fileDoc.id, "chunks", chunkDoc.id));
+            }
+            // Delete file doc
+            await deleteDoc(doc(db, "arquivos", fileDoc.id));
+            deletedFilesCount++;
+          }
+
+          // 2. Fetch all pastas
+          setBackupProgress("Buscando pastas mensais...");
+          const pastasSnap = await getDocs(collection(db, "pastas"));
+          let deletedFoldersCount = 0;
+          for (const folderDoc of pastasSnap.docs) {
+            setBackupProgress(`Excluindo pasta ${deletedFoldersCount + 1}/${pastasSnap.size}...`);
+            await deleteDoc(doc(db, "pastas", folderDoc.id));
+            deletedFoldersCount++;
+          }
+
+          onAddAuditLog(
+            "Limpeza de Banco de Dados",
+            `Excluiu permanentemente todas as pastas (${deletedFoldersCount}) e arquivos (${deletedFilesCount}) do portal.`
+          );
+
+          showAlert(
+            "Limpeza Concluída",
+            `Sucesso! Foram excluídas ${deletedFoldersCount} pastas mensais e ${deletedFilesCount} relatórios PDFs (com todos os fragmentos correspondentes) do banco de dados.`
+          );
+          onRefresh();
+        } catch (error) {
+          console.error(error);
+          showAlert("Erro na Limpeza", "Erro ao limpar dados: " + (error instanceof Error ? error.message : String(error)));
+        } finally {
+          setIsBackupLoading(false);
+          setBackupProgress("");
+        }
+      }
+    );
+  };
+
   const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -497,6 +557,28 @@ export default function AdminPanel({
     }
   };
 
+  const extractDriveFolderId = (input: string): string => {
+    const trimmed = input.trim();
+    if (!trimmed) return "";
+    
+    // Extract Google Drive Folder ID from URL
+    const foldersMatch = trimmed.match(/\/folders\/([a-zA-Z0-9-_]{25,50})/);
+    if (foldersMatch && foldersMatch[1]) {
+      return foldersMatch[1];
+    }
+    
+    const idMatch = trimmed.match(/[?&]id=([a-zA-Z0-9-_]{25,50})/);
+    if (idMatch && idMatch[1]) {
+      return idMatch[1];
+    }
+    
+    if (!trimmed.includes("/") && !trimmed.includes("?")) {
+      return trimmed;
+    }
+    
+    return trimmed;
+  };
+
   // Submitting Condominium
   const handleCreateCondo = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -508,23 +590,65 @@ export default function AdminPanel({
     }
 
     try {
+      const driveId = extractDriveFolderId(condoDriveLink);
       const docRef = await addDoc(collection(db, "condominios"), {
         name: condoName.trim(),
         administradoraId: finalAdmId,
         createdAt: new Date().toISOString(),
+        driveFolderId: driveId || "",
+        driveFolderUrl: condoDriveLink.trim() || "",
       });
       await updateDoc(doc(db, "condominios", docRef.id), { id: docRef.id });
 
       const admObj = administradoras.find(a => a.id === finalAdmId);
       onAddAuditLog(
         "Criação de Condomínio",
-        `Criou condomínio: ${condoName.trim()} vinculado à administradora: ${admObj?.name || finalAdmId}`
+        `Criou condomínio: ${condoName.trim()} com pasta Google Drive: ${driveId || "Nenhuma"} vinculado à administradora: ${admObj?.name || finalAdmId}`
       );
       setCondoName("");
+      setCondoDriveLink("");
       onRefresh();
     } catch (error) {
       console.error(error);
       showAlert("Erro", "Erro ao criar condomínio: " + (error instanceof Error ? error.message : String(error)));
+    }
+  };
+
+  const handleStartEditCondo = (condo: Condominium) => {
+    setEditingCondo(condo);
+    setEditCondoName(condo.name);
+    setEditCondoDriveLink((condo as any).driveFolderUrl || condo.driveFolderId || "");
+  };
+
+  const handleUpdateCondo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCondo) return;
+    if (!editCondoName.trim()) {
+      showAlert("Aviso", "O nome do condomínio não pode estar vazio.");
+      return;
+    }
+
+    try {
+      const driveId = extractDriveFolderId(editCondoDriveLink);
+      await updateDoc(doc(db, "condominios", editingCondo.id), {
+        name: editCondoName.trim(),
+        driveFolderId: driveId || "",
+        driveFolderUrl: editCondoDriveLink.trim() || "",
+      });
+
+      onAddAuditLog(
+        "Edição de Condomínio",
+        `Atualizou condomínio: ${editingCondo.name} -> ${editCondoName.trim()} com pasta Google Drive: ${driveId || "Nenhuma"}`
+      );
+
+      showAlert("Sucesso", "Condomínio atualizado com sucesso!");
+      setEditingCondo(null);
+      setEditCondoName("");
+      setEditCondoDriveLink("");
+      onRefresh();
+    } catch (error) {
+      console.error(error);
+      showAlert("Erro", "Erro ao atualizar condomínio: " + (error instanceof Error ? error.message : String(error)));
     }
   };
 
@@ -817,6 +941,25 @@ export default function AdminPanel({
                       />
                     </label>
                   </div>
+
+                  <hr className="border-[#111111]/10" />
+
+                  {/* 4. Limpeza de Testes / Reset */}
+                  <div className="space-y-2">
+                    <span className="text-[9px] font-bold text-red-700 uppercase tracking-widest block">
+                      Limpeza de Testes / Reset Geral
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleWipeAllData}
+                      className="w-full bg-red-700 hover:bg-red-850 text-white font-bold py-3 px-4 text-[10px] uppercase tracking-widest transition-colors cursor-pointer rounded-none border border-red-750 flex items-center justify-center gap-2"
+                    >
+                      <Trash2 className="w-4 h-4" /> Zerar Pastas e Relatórios
+                    </button>
+                    <p className="text-[9px] text-gray-500 font-serif italic text-center leading-normal">
+                      Exclui permanentemente todas as pastas de relatórios contábeis e arquivos do banco de dados para recomeçar do zero.
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
@@ -888,6 +1031,20 @@ export default function AdminPanel({
                   className="w-full px-4 py-3 border border-[#111111] rounded-none bg-white outline-none focus:bg-[#F4F2EE] text-sm"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-2">
+                  Link da Pasta do Google Drive (Opcional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Cole o link completo da pasta"
+                  value={condoDriveLink}
+                  onChange={(e) => setCondoDriveLink(e.target.value)}
+                  className="w-full px-4 py-3 border border-[#111111] rounded-none bg-white outline-none focus:bg-[#F4F2EE] text-sm"
+                />
+                <p className="text-[10px] text-gray-400 font-serif italic mt-1">Ex: https://drive.google.com/drive/folders/...</p>
               </div>
 
               {currentUser.role === "SuperADM" && (
@@ -974,7 +1131,21 @@ export default function AdminPanel({
                         const adm = administradoras.find((a) => a.id === c.administradoraId);
                         return (
                           <tr key={c.id} className="hover:bg-gray-50/50 transition-colors">
-                            <td className="py-4 px-4 font-bold text-[#111111]">{c.name}</td>
+                            <td className="py-4 px-4 font-bold text-[#111111]">
+                              <div className="flex flex-col">
+                                <span>{c.name}</span>
+                                {(c as any).driveFolderUrl && (
+                                  <a
+                                    href={(c as any).driveFolderUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[10px] text-emerald-800 hover:underline flex items-center gap-1 mt-0.5 font-sans font-semibold"
+                                  >
+                                    ☁️ Google Drive <ExternalLink className="w-3 h-3 inline shrink-0" />
+                                  </a>
+                                )}
+                              </div>
+                            </td>
                             <td className="py-4 px-4 text-xs font-bold text-gray-700 uppercase tracking-wide">
                               {adm ? adm.name : "Não vinculada"}
                             </td>
@@ -982,13 +1153,22 @@ export default function AdminPanel({
                               {new Date(c.createdAt).toLocaleDateString("pt-BR")}
                             </td>
                             <td className="py-4 px-4 text-right">
-                              <button
-                                onClick={() => handleDeleteCondo(c.id, c.name)}
-                                className="text-red-700 hover:text-red-950 p-1.5 border border-transparent hover:border-gray-200 transition-colors cursor-pointer"
-                                title="Excluir"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => handleStartEditCondo(c)}
+                                  className="text-gray-600 hover:text-stone-900 p-1.5 border border-transparent hover:border-gray-200 transition-colors cursor-pointer"
+                                  title="Editar condomínio e link do Drive"
+                                >
+                                  <UserCog className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteCondo(c.id, c.name)}
+                                  className="text-red-700 hover:text-red-950 p-1.5 border border-transparent hover:border-gray-200 transition-colors cursor-pointer"
+                                  title="Excluir"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1046,8 +1226,18 @@ export default function AdminPanel({
                                 return (
                                   <div key={c.id} className="bg-white p-3 border border-gray-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 hover:shadow-xs transition-all">
                                     <div className="space-y-1">
-                                      <div className="font-bold text-xs text-[#111111]">
-                                        🏢 {c.name}
+                                      <div className="font-bold text-xs text-[#111111] flex flex-wrap items-center gap-2">
+                                        <span>🏢 {c.name}</span>
+                                        {(c as any).driveFolderUrl && (
+                                          <a
+                                            href={(c as any).driveFolderUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-[10px] text-emerald-800 hover:underline flex items-center gap-1 font-sans font-semibold bg-emerald-50 px-1.5 py-0.5 border border-emerald-100"
+                                          >
+                                            ☁️ Google Drive <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                                          </a>
+                                        )}
                                       </div>
                                       <div className="text-[10px] text-gray-500 font-mono flex flex-wrap items-center gap-x-2 gap-y-0.5">
                                         <span>Data: {new Date(c.createdAt).toLocaleDateString("pt-BR")}</span>
@@ -1061,7 +1251,14 @@ export default function AdminPanel({
                                         </span>
                                       </div>
                                     </div>
-                                    <div>
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        onClick={() => handleStartEditCondo(c)}
+                                        className="p-1.5 border border-gray-200 hover:border-[#C2A87E] text-gray-600 hover:text-[#C2A87E] hover:bg-stone-50 cursor-pointer transition-all"
+                                        title="Editar Condomínio e link do Drive"
+                                      >
+                                        <UserCog className="w-4 h-4" />
+                                      </button>
                                       <button
                                         onClick={() => handleDeleteCondo(c.id, c.name)}
                                         className="p-1.5 border border-gray-200 hover:border-red-400 text-gray-600 hover:text-red-700 hover:bg-red-50 cursor-pointer transition-all"
@@ -2363,6 +2560,81 @@ export default function AdminPanel({
                 <button
                   type="button"
                   onClick={() => setEditingUser(null)}
+                  className="px-4 py-2 bg-white hover:bg-gray-100 text-[#111111] text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-[#111111] hover:bg-[#C2A87E] text-white text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
+                >
+                  Salvar Alterações
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EDITAR CONDOMÍNIO */}
+      {editingCondo && (
+        <div id="editCondoModal" className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div 
+            className="absolute inset-0 bg-black/45 backdrop-blur-xs transition-opacity"
+            onClick={() => setEditingCondo(null)}
+          />
+          <div className="relative bg-[#FAF9F6] border border-[#111111] p-6 max-w-lg w-full shadow-2xl z-10 space-y-4">
+            <div className="border-b border-[#111111]/10 pb-3 flex items-center justify-between">
+              <div>
+                <span className="text-[9px] uppercase tracking-[0.2em] font-bold text-gray-400 block">
+                  Configurações do Condomínio
+                </span>
+                <h3 className="font-serif italic text-xl text-[#111111] mt-0.5">
+                  Editar Condomínio
+                </h3>
+              </div>
+              <button 
+                onClick={() => setEditingCondo(null)}
+                className="text-xs uppercase font-bold tracking-widest text-gray-500 hover:text-black cursor-pointer"
+              >
+                [Fechar]
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateCondo} className="space-y-4">
+              <div>
+                <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-1.5">
+                  Nome do Condomínio
+                </label>
+                <input
+                  type="text"
+                  value={editCondoName}
+                  onChange={(e) => setEditCondoName(e.target.value)}
+                  className="w-full px-3 py-2 border border-[#111111] rounded-none bg-white text-sm outline-none focus:bg-[#F4F2EE]"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[9px] font-bold text-[#111111] uppercase tracking-widest mb-1.5">
+                  Link da Pasta do Google Drive
+                </label>
+                <input
+                  type="text"
+                  value={editCondoDriveLink}
+                  onChange={(e) => setEditCondoDriveLink(e.target.value)}
+                  placeholder="https://drive.google.com/drive/folders/..."
+                  className="w-full px-3 py-2 border border-[#111111] rounded-none bg-white text-sm outline-none focus:bg-[#F4F2EE] font-mono text-xs"
+                />
+                <p className="text-[10px] text-gray-500 font-serif italic mt-1">
+                  Cole o endereço web completo da pasta para vinculá-la ou deixe em branco para desvincular.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setEditingCondo(null)}
                   className="px-4 py-2 bg-white hover:bg-gray-100 text-[#111111] text-xs uppercase font-bold tracking-widest border border-[#111111] transition-colors cursor-pointer"
                 >
                   Cancelar

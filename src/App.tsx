@@ -1253,6 +1253,8 @@ export default function App() {
                   selectedCondominiumId={selectedCondominiumId}
                   protocols={protocols}
                   messages={messages}
+                  files={files}
+                  folders={folders}
                   onRefresh={() => {}}
                   onAddAuditLog={addAuditLog}
                   condominiumName={selectedCondoName}
